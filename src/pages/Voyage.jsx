@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import Map from '../components/Map';
 import DateRangePicker from '../components/DateRangePicker';
@@ -10,15 +10,6 @@ function formatDate(str) {
   const mois = ['jan','fév','mar','avr','mai','jun','jul','aoû','sep','oct','nov','déc'];
   return `${d} ${mois[parseInt(m) - 1]}`;
 }
-
-const IconUsers = () => (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
-    <circle cx="9" cy="7" r="4"/>
-    <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
-    <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
-  </svg>
-)
 
 export default function Voyage({ voyageId, onSelectEtape, onBack, session }) {
   const [voyage, setVoyage] = useState(null);
@@ -33,20 +24,38 @@ export default function Voyage({ voyageId, onSelectEtape, onBack, session }) {
   const [sugLoading, setSugLoading] = useState(false);
   const [selected, setSelected] = useState(null);
   const [routes, setRoutes] = useState({});
-  const timer = { current: null };
-  const [hotelSuggestions, setHotelSuggestions] = useState([]);
-  const [hotelSugLoading, setHotelSugLoading] = useState(false);
-  const [hotelSelected, setHotelSelected] = useState(false);
-  const hotelTimer = { current: null };
+  const timer = useRef(null);
+
+  // Edit modal state
   const [editNom, setEditNom] = useState('');
   const [editNuits, setEditNuits] = useState('');
+  const [editLieuNom, setEditLieuNom] = useState('');
+  const [editLieuSelected, setEditLieuSelected] = useState(null);
+  const [editLieuSuggestions, setEditLieuSuggestions] = useState([]);
+  const [editLieuLoading, setEditLieuLoading] = useState(false);
+  const editLieuTimer = useRef(null);
   const [editHotelNom, setEditHotelNom] = useState('');
   const [editHotelAdresse, setEditHotelAdresse] = useState('');
   const [editHotelConfirmation, setEditHotelConfirmation] = useState('');
   const [editCheckin, setEditCheckin] = useState('');
   const [editCheckout, setEditCheckout] = useState('');
+  const [hotelSuggestions, setHotelSuggestions] = useState([]);
+  const [hotelSugLoading, setHotelSugLoading] = useState(false);
+  const [hotelSelected, setHotelSelected] = useState(false);
+  const hotelTimer = useRef(null);
+
+  // Sheet
   const [sheetExpanded, setSheetExpanded] = useState(true);
-  const dragStart = useRef(null);
+  const sheetDragStart = useRef(null);
+
+  // Drag & drop étapes
+  const [dragIndex, setDragIndex] = useState(null);
+  const [dragOverIndex, setDragOverIndex] = useState(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const longPressTimer = useRef(null);
+  const dragStartX = useRef(null);
+  const dragStartScrollLeft = useRef(null);
+  const hscrollRef = useRef(null);
 
   useEffect(() => { fetchData(); }, [voyageId]);
 
@@ -83,6 +92,16 @@ export default function Voyage({ voyageId, onSelectEtape, onBack, session }) {
     setSugLoading(false);
   };
 
+  const searchEditLieu = async (q) => {
+    if (q.length < 3) { setEditLieuSuggestions([]); return; }
+    setEditLieuLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('geocode', { body: { q } });
+      if (!error) setEditLieuSuggestions(data || []);
+    } catch {}
+    setEditLieuLoading(false);
+  };
+
   const searchHotel = async (q) => {
     if (q.length < 3) { setHotelSuggestions([]); return; }
     setHotelSugLoading(true);
@@ -110,6 +129,9 @@ export default function Voyage({ voyageId, onSelectEtape, onBack, session }) {
     setEditModal(e);
     setEditNom(e.nom || '');
     setEditNuits(String(e.nuits || 1));
+    setEditLieuNom(e.nom || '');
+    setEditLieuSelected(null);
+    setEditLieuSuggestions([]);
     setEditHotelNom(e.hotel_nom || '');
     setEditHotelAdresse(e.hotel_adresse || '');
     setEditHotelConfirmation(e.hotel_confirmation || '');
@@ -122,7 +144,9 @@ export default function Voyage({ voyageId, onSelectEtape, onBack, session }) {
   const saveEdit = async () => {
     if (!editModal) return;
     await supabase.from('etapes').update({
-      nom: editNom,
+      nom: editLieuSelected?.name || editLieuNom || editNom,
+      lat: editLieuSelected?.lat ?? editModal.lat,
+      lon: editLieuSelected?.lon ?? editModal.lon,
       nuits: parseInt(editNuits) || 1,
       hotel_nom: editHotelNom,
       hotel_adresse: editHotelAdresse,
@@ -140,14 +164,79 @@ export default function Voyage({ voyageId, onSelectEtape, onBack, session }) {
     fetchData();
   };
 
-  const onDragStart = (e) => { dragStart.current = e.touches ? e.touches[0].clientY : e.clientY; };
-  const onDragEnd = (e) => {
-    if (dragStart.current === null) return;
+  // Réordonner les étapes
+  const saveOrder = async (newEtapes) => {
+    await Promise.all(newEtapes.map((e, i) =>
+      supabase.from('etapes').update({ ordre: i }).eq('id', e.id)
+    ));
+  };
+
+  // --- Drag & drop handlers ---
+  const handleCardTouchStart = (i, e) => {
+    if (isDragging) return;
+    const touch = e.touches[0];
+    dragStartX.current = touch.clientX;
+    dragStartScrollLeft.current = hscrollRef.current?.scrollLeft || 0;
+    longPressTimer.current = setTimeout(() => {
+      setIsDragging(true);
+      setDragIndex(i);
+      setDragOverIndex(i);
+      if (navigator.vibrate) navigator.vibrate(40);
+    }, 500);
+  };
+
+  const handleCardTouchMove = (i, e) => {
+    if (!isDragging) {
+      // Annuler le long press si l'utilisateur scrolle
+      const touch = e.touches[0];
+      const dx = Math.abs(touch.clientX - dragStartX.current);
+      if (dx > 8) {
+        clearTimeout(longPressTimer.current);
+      }
+      return;
+    }
+    e.preventDefault();
+    const touch = e.touches[0];
+    const container = hscrollRef.current;
+    if (!container) return;
+
+    // Trouver la carte sous le doigt
+    const cards = container.querySelectorAll('[data-card]');
+    let newOver = dragIndex;
+    cards.forEach((card, idx) => {
+      const rect = card.getBoundingClientRect();
+      if (touch.clientX >= rect.left && touch.clientX <= rect.right) {
+        newOver = idx;
+      }
+    });
+    if (newOver !== dragOverIndex) setDragOverIndex(newOver);
+  };
+
+  const handleCardTouchEnd = () => {
+    clearTimeout(longPressTimer.current);
+    if (!isDragging) return;
+
+    if (dragIndex !== null && dragOverIndex !== null && dragIndex !== dragOverIndex) {
+      const newEtapes = [...etapes];
+      const [moved] = newEtapes.splice(dragIndex, 1);
+      newEtapes.splice(dragOverIndex, 0, moved);
+      setEtapes(newEtapes);
+      saveOrder(newEtapes);
+    }
+    setIsDragging(false);
+    setDragIndex(null);
+    setDragOverIndex(null);
+  };
+
+  // Sheet drag
+  const onSheetDragStart = (e) => { sheetDragStart.current = e.touches ? e.touches[0].clientY : e.clientY; };
+  const onSheetDragEnd = (e) => {
+    if (sheetDragStart.current === null) return;
     const endY = e.changedTouches ? e.changedTouches[0].clientY : e.clientY;
-    const diff = endY - dragStart.current;
+    const diff = endY - sheetDragStart.current;
     if (diff > 40) setSheetExpanded(false);
     else if (diff < -40) setSheetExpanded(true);
-    dragStart.current = null;
+    sheetDragStart.current = null;
   };
 
   const totalNuits = etapes.reduce((s, e) => s + (e.nuits || 0), 0);
@@ -156,7 +245,7 @@ export default function Voyage({ voyageId, onSelectEtape, onBack, session }) {
 
   return (
     <div style={s.app}>
-      {/* Top bar flottante */}
+      {/* Top bar */}
       <div style={s.topbar}>
         <button style={s.backBtn} onClick={onBack}>←</button>
         <div style={{ flex: 1 }}>
@@ -170,9 +259,14 @@ export default function Voyage({ voyageId, onSelectEtape, onBack, session }) {
         <Map etapes={etapes} routes={routes} />
       </div>
 
+      {/* Indicateur drag actif */}
+      {isDragging && (
+        <div style={s.dragHint}>Glisse pour réorganiser</div>
+      )}
+
       {/* Sheet */}
-      <div style={{ ...s.sheet, height: sheetExpanded ? SHEET_EXPANDED : SHEET_COLLAPSED, transition: 'height 0.35s cubic-bezier(0.4,0,0.2,1)', overflow: 'hidden', flexShrink: 0 }}>
-        <div style={s.handleWrap} onMouseDown={onDragStart} onMouseUp={onDragEnd} onTouchStart={onDragStart} onTouchEnd={onDragEnd} onClick={() => setSheetExpanded(e => !e)}>
+      <div style={{ ...s.sheet, height: sheetExpanded ? SHEET_EXPANDED : SHEET_COLLAPSED, transition: isDragging ? 'none' : 'height 0.35s cubic-bezier(0.4,0,0.2,1)', overflow: 'hidden', flexShrink: 0 }}>
+        <div style={s.handleWrap} onMouseDown={onSheetDragStart} onMouseUp={onSheetDragEnd} onTouchStart={onSheetDragStart} onTouchEnd={onSheetDragEnd} onClick={() => setSheetExpanded(e => !e)}>
           <div style={s.handle} />
         </div>
 
@@ -203,32 +297,48 @@ export default function Voyage({ voyageId, onSelectEtape, onBack, session }) {
 
         {sheetExpanded && (
           <>
-<div style={s.sheetHeader}>
-  <span style={s.sheetTitle}>Étapes</span>
-  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-    <button style={s.equipageBtn} onClick={() => setEquipageOpen(true)}>
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-  <circle cx="9" cy="7" r="4"/>
-  <path d="M3 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2"/>
-  <line x1="19" y1="8" x2="19" y2="14"/>
-  <line x1="16" y1="11" x2="22" y2="11"/>
-</svg>      <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.6)', marginLeft: 5 }}>Équipage</span>
-    </button>
-    <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)', cursor: 'pointer' }} onClick={() => setSheetExpanded(false)}>▾</span>
-  </div>
-</div>
+            <div style={s.sheetHeader}>
+              <span style={s.sheetTitle}>Étapes</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <button style={s.equipageBtn} onClick={() => setEquipageOpen(true)}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="9" cy="7" r="4"/>
+                    <path d="M3 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2"/>
+                    <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+                    <path d="M21 21v-2a4 4 0 0 0-3-3.87"/>
+                  </svg>
+                  <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.6)', marginLeft: 5 }}>Équipage</span>
+                </button>
+                <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)', cursor: 'pointer' }} onClick={() => setSheetExpanded(false)}>▾</span>
+              </div>
+            </div>
+
             {loading ? (
               <div style={s.empty}>Chargement…</div>
             ) : etapes.length === 0 ? (
               <div style={s.empty}>Ajoute ta première étape</div>
             ) : (
-              <div style={s.hscroll}>
+              <div
+                ref={hscrollRef}
+                style={{ ...s.hscroll, overflowX: isDragging ? 'hidden' : 'auto' }}
+                onTouchEnd={handleCardTouchEnd}
+              >
                 {etapes.map((e, i) => {
                   const prev = etapes[i - 1];
                   const route = routes[e.id];
+                  const isBeingDragged = isDragging && dragIndex === i;
+                  const isDropTarget = isDragging && dragOverIndex === i && dragIndex !== i;
+
                   return (
-                    <div key={e.id} style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
-                      {i > 0 && (
+                    <div
+                      key={e.id}
+                      data-card={i}
+                      style={{ display: 'flex', alignItems: 'center', flexShrink: 0, transition: 'transform 0.2s' }}
+                      onTouchStart={ev => handleCardTouchStart(i, ev)}
+                      onTouchMove={ev => handleCardTouchMove(i, ev)}
+                      onTouchEnd={handleCardTouchEnd}
+                    >
+                      {i > 0 && !isDragging && (
                         <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
                           <div style={{ height: 1, width: 10, background: 'rgba(255,255,255,0.15)' }} />
                           <div style={s.routePill}>
@@ -237,25 +347,39 @@ export default function Voyage({ voyageId, onSelectEtape, onBack, session }) {
                               <a href={`https://www.google.com/maps/dir/${prev.lat},${prev.lon}/${e.lat},${e.lon}`} target="_blank" rel="noreferrer" style={s.routePillLink}
                                 onMouseEnter={ev => { ev.currentTarget.style.background = 'rgba(255,255,255,0.1)'; ev.currentTarget.style.color = 'white'; }}
                                 onMouseLeave={ev => { ev.currentTarget.style.background = 'none'; ev.currentTarget.style.color = 'rgba(255,255,255,0.6)'; }}>
-                                ↗ Trajet voiture
+                                ↗ Voiture
                               </a>
                             )}
                             <a href={`https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(prev.hotel_adresse || prev.nom)}&destination=${encodeURIComponent(e.hotel_adresse || e.nom)}&travelmode=transit`} target="_blank" rel="noreferrer" style={{ ...s.routePillLink, marginTop: 4 }}
                               onMouseEnter={ev => { ev.currentTarget.style.background = 'rgba(255,255,255,0.1)'; ev.currentTarget.style.color = 'white'; }}
                               onMouseLeave={ev => { ev.currentTarget.style.background = 'none'; ev.currentTarget.style.color = 'rgba(255,255,255,0.6)'; }}>
-                              ↗ Trajet Train
+                              ↗ Train
                             </a>
                           </div>
                           <div style={{ height: 1, width: 10, background: 'rgba(255,255,255,0.15)' }} />
                         </div>
                       )}
+                      {isDragging && i > 0 && (
+                        <div style={{ width: 12, flexShrink: 0 }} />
+                      )}
                       <div
-                        style={{ ...s.ecard, backgroundImage: `linear-gradient(to bottom, rgba(10,14,20,0.3) 0%, rgba(10,14,20,0.85) 60%, rgba(10,14,20,0.97) 100%), url(https://source.unsplash.com/200x300/?${encodeURIComponent(e.nom)},japan)`, backgroundSize: 'cover', backgroundPosition: 'center' }}
-                        onClick={() => onSelectEtape(e.id)}
-                        onMouseEnter={ev => { ev.currentTarget.style.transform = 'translateY(-4px)'; ev.currentTarget.style.boxShadow = '0 16px 40px rgba(0,0,0,0.5), 0 4px 12px rgba(0,0,0,0.3)'; }}
-                        onMouseLeave={ev => { ev.currentTarget.style.transform = 'translateY(0px)'; ev.currentTarget.style.boxShadow = '0 8px 32px rgba(0,0,0,0.4), 0 2px 8px rgba(0,0,0,0.2)'; }}
+                        style={{
+                          ...s.ecard,
+                          backgroundImage: `linear-gradient(to bottom, rgba(10,14,20,0.3) 0%, rgba(10,14,20,0.85) 60%, rgba(10,14,20,0.97) 100%), url(https://source.unsplash.com/200x300/?${encodeURIComponent(e.nom)},japan)`,
+                          backgroundSize: 'cover',
+                          backgroundPosition: 'center',
+                          transform: isBeingDragged ? 'scale(1.05) rotate(1.5deg)' : isDropTarget ? 'translateX(8px)' : 'none',
+                          opacity: isBeingDragged ? 0.85 : 1,
+                          boxShadow: isBeingDragged ? '0 20px 50px rgba(0,0,0,0.7)' : '0 8px 32px rgba(0,0,0,0.4)',
+                          transition: isBeingDragged ? 'none' : 'transform 0.2s, opacity 0.2s, box-shadow 0.2s',
+                          cursor: isDragging ? 'grabbing' : 'pointer',
+                          outline: isDropTarget ? '2px solid rgba(255,255,255,0.3)' : 'none',
+                        }}
+                        onClick={() => { if (!isDragging) onSelectEtape(e.id); }}
+                        onMouseEnter={ev => { if (!isDragging) { ev.currentTarget.style.transform = 'translateY(-4px)'; ev.currentTarget.style.boxShadow = '0 16px 40px rgba(0,0,0,0.5)'; }}}
+                        onMouseLeave={ev => { if (!isDragging) { ev.currentTarget.style.transform = 'translateY(0px)'; ev.currentTarget.style.boxShadow = '0 8px 32px rgba(0,0,0,0.4)'; }}}
                       >
-                        <button style={s.delBtn} onClick={ev => deleteEtape(e.id, ev)}>✕</button>
+                        {!isDragging && <button style={s.delBtn} onClick={ev => deleteEtape(e.id, ev)}>✕</button>}
                         <div style={s.ecardName}>{e.nom}</div>
                         <div style={s.ecardNuits}>{e.nuits} nuit{e.nuits > 1 ? 's' : ''} · {e.nuits + 1} jour{e.nuits + 1 > 1 ? 's' : ''}</div>
                         <div style={s.ecardSection}>
@@ -276,7 +400,12 @@ export default function Voyage({ voyageId, onSelectEtape, onBack, session }) {
                           )}
                         </div>
                         <div style={s.ecardDivider} />
-                        <button style={s.editBtn} onClick={ev => { ev.stopPropagation(); openEdit(e); }}>Éditer l'étape</button>
+                        {!isDragging && (
+                          <button style={s.editBtn} onClick={ev => { ev.stopPropagation(); openEdit(e); }}>Éditer l'étape</button>
+                        )}
+                        {isDragging && (
+                          <div style={{ textAlign: 'center', fontSize: 10, color: 'rgba(255,255,255,0.3)', padding: '4px 0' }}>≡ glisser</div>
+                        )}
                       </div>
                     </div>
                   );
@@ -292,11 +421,7 @@ export default function Voyage({ voyageId, onSelectEtape, onBack, session }) {
 
       {/* Modal équipage */}
       {equipageOpen && (
-        <EquipageModal
-          voyageId={voyageId}
-          session={session}
-          onClose={() => setEquipageOpen(false)}
-        />
+        <EquipageModal voyageId={voyageId} session={session} onClose={() => setEquipageOpen(false)} />
       )}
 
       {/* Modal ajout étape */}
@@ -336,15 +461,39 @@ export default function Voyage({ voyageId, onSelectEtape, onBack, session }) {
           <div style={s.modal}>
             <div style={s.mhandle} />
             <div style={s.mtitle}>{editModal.nom}</div>
-            <div style={s.sectionLabel}>Général</div>
+
+            <div style={s.sectionLabel}>Lieu</div>
             <div style={s.fg}>
-              <label style={s.fl}>Nom de la ville</label>
-              <input style={s.fi} value={editNom} onChange={e => setEditNom(e.target.value)} />
+              <label style={s.fl}>Ville</label>
+              <input
+                value={editLieuNom}
+                onChange={e => {
+                  setEditLieuNom(e.target.value);
+                  setEditLieuSelected(null);
+                  clearTimeout(editLieuTimer.current);
+                  editLieuTimer.current = setTimeout(() => searchEditLieu(e.target.value), 500);
+                }}
+                style={{ ...s.fi, borderRadius: editLieuSuggestions.length && !editLieuSelected ? '12px 12px 0 0' : 12 }}
+              />
+              {editLieuLoading && <div style={s.acWrap}><span style={{ color: 'rgba(255,255,255,0.4)', fontSize: 13 }}>Recherche…</span></div>}
+              {editLieuSuggestions.length > 0 && !editLieuSelected && (
+                <div style={s.acList}>
+                  {editLieuSuggestions.map((r, i) => (
+                    <div key={i} style={s.acItem} onClick={() => { setEditLieuSelected(r); setEditLieuNom(r.name); setEditLieuSuggestions([]); }}>
+                      <div style={s.acName}>{r.name}</div>
+                      <div style={s.acAddr}>{r.address}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
+
+            <div style={s.sectionLabel}>Général</div>
             <div style={s.fg}>
               <label style={s.fl}>Nuits</label>
               <input style={s.fi} type="number" min="1" value={editNuits} onChange={e => setEditNuits(e.target.value)} />
             </div>
+
             <div style={s.sectionLabel}>Hôtel</div>
             <div style={s.fg}>
               <label style={s.fl}>Nom de l'hôtel</label>
@@ -380,53 +529,55 @@ export default function Voyage({ voyageId, onSelectEtape, onBack, session }) {
 }
 
 const s = {
-  app:          { position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column', background: '#0D1117' },
-  topbar:       { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10, padding: '16px 20px 0', display: 'flex', alignItems: 'flex-start', gap: 12, pointerEvents: 'none' },
-  backBtn:      { width: 40, height: 40, borderRadius: '50%', background: 'rgba(255,255,255,0.1)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255,255,255,0.15)', color: 'white', cursor: 'pointer', fontSize: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, pointerEvents: 'all' },
-  equipageBtn: { background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 20, color: 'rgba(255,255,255,0.7)', cursor: 'pointer', padding: '5px 12px', display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontFamily: 'inherit' },  title:        { fontFamily: 'Georgia,serif', fontSize: 22, color: 'white', textShadow: '0 2px 16px rgba(0,0,0,0.6)' },
-  sub:          { fontSize: 12, color: 'rgba(255,255,255,0.4)', marginTop: 2 },
-  sheet:        { background: 'rgba(10,14,20,0.95)', backdropFilter: 'blur(24px)', borderRadius: '22px 22px 0 0', borderTop: '1px solid rgba(255,255,255,0.07)', position: 'relative', zIndex: 10, display: 'flex', flexDirection: 'column' },
-  handleWrap:   { padding: '10px 0 4px', cursor: 'grab', userSelect: 'none' },
-  handle:       { width: 36, height: 4, background: 'rgba(255,255,255,0.15)', borderRadius: 2, margin: '0 auto' },
-  sheetHeader:  { padding: '4px 20px 6px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
-  sheetTitle:   { fontFamily: 'Georgia,serif', fontSize: 15, color: 'rgba(255,255,255,0.8)' },
-  hscroll:      { overflowX: 'auto', display: 'flex', alignItems: 'center', gap: 0, padding: '10px 20px 20px', scrollbarWidth: 'none' },
-  miniScroll:   { overflowX: 'auto', display: 'flex', alignItems: 'center', padding: '0 16px', scrollbarWidth: 'none', gap: 0, maxWidth: '100%' },
-  miniCard:     { background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10, padding: '5px 10px', flexShrink: 0, cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 },
-  miniCardName: { fontSize: 11, color: 'white', fontWeight: 500, whiteSpace: 'nowrap' },
-  miniCardNuits:{ fontSize: 9, color: 'rgba(255,255,255,0.4)', whiteSpace: 'nowrap' },
-  miniConnector:{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '0 4px', flexShrink: 0 },
+  app:           { position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column', background: '#0D1117' },
+  topbar:        { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10, padding: '16px 20px 0', display: 'flex', alignItems: 'flex-start', gap: 12, pointerEvents: 'none' },
+  backBtn:       { width: 40, height: 40, borderRadius: '50%', background: 'rgba(255,255,255,0.1)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255,255,255,0.15)', color: 'white', cursor: 'pointer', fontSize: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, pointerEvents: 'all' },
+  equipageBtn:   { background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 20, color: 'rgba(255,255,255,0.7)', cursor: 'pointer', padding: '5px 12px', display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontFamily: 'inherit' },
+  title:         { fontFamily: 'Georgia,serif', fontSize: 22, color: 'white', textShadow: '0 2px 16px rgba(0,0,0,0.6)' },
+  sub:           { fontSize: 12, color: 'rgba(255,255,255,0.4)', marginTop: 2 },
+  dragHint:      { position: 'absolute', top: 16, left: '50%', transform: 'translateX(-50%)', background: 'rgba(255,255,255,0.12)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 12, padding: '8px 16px', color: 'white', fontSize: 12, zIndex: 50, pointerEvents: 'none' },
+  sheet:         { background: 'rgba(10,14,20,0.95)', backdropFilter: 'blur(24px)', borderRadius: '22px 22px 0 0', borderTop: '1px solid rgba(255,255,255,0.07)', position: 'relative', zIndex: 10, display: 'flex', flexDirection: 'column' },
+  handleWrap:    { padding: '10px 0 4px', cursor: 'grab', userSelect: 'none' },
+  handle:        { width: 36, height: 4, background: 'rgba(255,255,255,0.15)', borderRadius: 2, margin: '0 auto' },
+  sheetHeader:   { padding: '4px 20px 6px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
+  sheetTitle:    { fontFamily: 'Georgia,serif', fontSize: 15, color: 'rgba(255,255,255,0.8)' },
+  hscroll:       { overflowX: 'auto', display: 'flex', alignItems: 'center', gap: 0, padding: '10px 20px 20px', scrollbarWidth: 'none' },
+  miniScroll:    { overflowX: 'auto', display: 'flex', alignItems: 'center', padding: '0 16px', scrollbarWidth: 'none', gap: 0, maxWidth: '100%' },
+  miniCard:      { background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10, padding: '5px 10px', flexShrink: 0, cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 },
+  miniCardName:  { fontSize: 11, color: 'white', fontWeight: 500, whiteSpace: 'nowrap' },
+  miniCardNuits: { fontSize: 9, color: 'rgba(255,255,255,0.4)', whiteSpace: 'nowrap' },
+  miniConnector: { display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '0 4px', flexShrink: 0 },
   miniConnectorLine: { height: 1, width: 16, background: 'rgba(255,255,255,0.15)' },
   miniConnectorText: { fontSize: 9, color: 'rgba(255,255,255,0.4)', whiteSpace: 'nowrap', padding: '2px 0' },
-  ecard:        { background: 'rgba(255,255,255,0.055)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 18, padding: '14px 16px', width: 200, cursor: 'pointer', flexShrink: 0, position: 'relative', boxShadow: '0 8px 32px rgba(0,0,0,0.4), 0 2px 8px rgba(0,0,0,0.2)', transition: 'transform 0.2s ease, box-shadow 0.2s ease' },
-  ecardName:    { fontFamily: 'Georgia,serif', fontSize: 17, color: 'white', marginBottom: 4, paddingRight: 20 },
-  ecardNuits:   { fontSize: 11, color: 'rgba(255,255,255,0.5)', marginBottom: 10 },
-  ecardSection: { marginBottom: 10 },
-  ecardHotelNom:{ fontSize: 12, color: 'white', fontWeight: 500, marginBottom: 2 },
+  ecard:         { background: 'rgba(255,255,255,0.055)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 18, padding: '14px 16px', width: 200, cursor: 'pointer', flexShrink: 0, position: 'relative', boxShadow: '0 8px 32px rgba(0,0,0,0.4), 0 2px 8px rgba(0,0,0,0.2)' },
+  ecardName:     { fontFamily: 'Georgia,serif', fontSize: 17, color: 'white', marginBottom: 4, paddingRight: 20 },
+  ecardNuits:    { fontSize: 11, color: 'rgba(255,255,255,0.5)', marginBottom: 10 },
+  ecardSection:  { marginBottom: 10 },
+  ecardHotelNom: { fontSize: 12, color: 'white', fontWeight: 500, marginBottom: 2 },
   ecardHotelAddr:{ fontSize: 11, color: 'rgba(255,255,255,0.35)', marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   ecardHotelDates:{ fontSize: 10, color: 'rgba(255,255,255,0.3)' },
-  ecardNoHotel: { fontSize: 11, color: 'rgba(255,255,255,0.25)', fontStyle: 'italic' },
-  ecardDivider: { height: 1, background: 'rgba(255,255,255,0.07)', margin: '8px 0' },
-  editBtn:      { display: 'block', width: '100%', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, color: 'rgba(255,255,255,0.4)', cursor: 'pointer', fontSize: 11, padding: '5px 0', fontFamily: 'inherit', textAlign: 'center', marginTop: 4 },
-  routePill:    { background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 20, padding: '5px 12px', flexShrink: 0 },
-  routePillVal: { fontSize: 11, color: 'white', fontWeight: 500, whiteSpace: 'nowrap' },
-  routePillLink:{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 10, color: 'rgba(255,255,255,0.6)', textDecoration: 'none', marginTop: 3, whiteSpace: 'nowrap', padding: '3px 8px', borderRadius: 20, border: '1px solid rgba(255,255,255,0.12)', transition: 'all 0.15s' },
-  delBtn:       { position: 'absolute', top: 8, right: 8, background: 'none', border: 'none', color: 'rgba(255,255,255,0.2)', cursor: 'pointer', fontSize: 12 },
-  empty:        { textAlign: 'center', padding: '20px', color: 'rgba(255,255,255,0.3)', fontSize: 14 },
-  fab:          { position: 'absolute', zIndex: 20, bottom: 16, right: 20, width: 50, height: 50, borderRadius: '50%', background: 'white', color: '#0D1117', border: 'none', cursor: 'pointer', fontSize: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 20px rgba(0,0,0,0.45)' },
-  overlay:      { position: 'fixed', inset: 0, zIndex: 200, background: 'rgba(0,0,0,0.72)', display: 'flex', alignItems: 'flex-end' },
-  modal:        { background: '#12171F', borderRadius: '24px 24px 0 0', borderTop: '1px solid rgba(255,255,255,0.08)', padding: '0 20px 44px', width: '100%', maxHeight: '88vh', overflowY: 'auto' },
-  mhandle:      { width: 36, height: 4, background: 'rgba(255,255,255,0.12)', borderRadius: 2, margin: '14px auto 22px' },
-  mtitle:       { fontFamily: 'Georgia,serif', fontSize: 21, color: 'white', marginBottom: 20 },
-  sectionLabel: { fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'rgba(255,255,255,0.25)', marginBottom: 12, marginTop: 8 },
-  fg:           { marginBottom: 12 },
-  fl:           { fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'rgba(255,255,255,0.35)', marginBottom: 6, display: 'block' },
-  fi:           { width: '100%', padding: '12px 14px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.09)', borderRadius: 12, color: 'white', fontSize: 15, outline: 'none', boxSizing: 'border-box', fontFamily: 'inherit' },
-  acWrap:       { padding: '10px 14px', background: '#181E28', border: '1px solid rgba(255,255,255,0.09)', borderTop: 'none', borderRadius: '0 0 12px 12px' },
-  acList:       { background: '#181E28', border: '1px solid rgba(255,255,255,0.09)', borderTop: 'none', borderRadius: '0 0 12px 12px', overflow: 'hidden' },
-  acItem:       { padding: '11px 14px', cursor: 'pointer', borderBottom: '1px solid rgba(255,255,255,0.05)' },
-  acName:       { fontSize: 14, fontWeight: 500, color: 'white' },
-  acAddr:       { fontSize: 11, color: 'rgba(255,255,255,0.35)', marginTop: 2 },
-  btnP:         { width: '100%', padding: 14, background: 'white', color: '#0D1117', border: 'none', borderRadius: 12, fontSize: 15, fontWeight: 600, cursor: 'pointer', marginTop: 4 },
-  btnG:         { width: '100%', padding: 12, background: 'none', color: 'rgba(255,255,255,0.35)', border: '1px solid rgba(255,255,255,0.09)', borderRadius: 12, fontSize: 14, cursor: 'pointer', marginTop: 8 },
+  ecardNoHotel:  { fontSize: 11, color: 'rgba(255,255,255,0.25)', fontStyle: 'italic' },
+  ecardDivider:  { height: 1, background: 'rgba(255,255,255,0.07)', margin: '8px 0' },
+  editBtn:       { display: 'block', width: '100%', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, color: 'rgba(255,255,255,0.4)', cursor: 'pointer', fontSize: 11, padding: '5px 0', fontFamily: 'inherit', textAlign: 'center', marginTop: 4 },
+  routePill:     { background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 20, padding: '5px 12px', flexShrink: 0 },
+  routePillVal:  { fontSize: 11, color: 'white', fontWeight: 500, whiteSpace: 'nowrap' },
+  routePillLink: { display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 10, color: 'rgba(255,255,255,0.6)', textDecoration: 'none', marginTop: 3, whiteSpace: 'nowrap', padding: '3px 8px', borderRadius: 20, border: '1px solid rgba(255,255,255,0.12)', transition: 'all 0.15s' },
+  delBtn:        { position: 'absolute', top: 8, right: 8, background: 'none', border: 'none', color: 'rgba(255,255,255,0.2)', cursor: 'pointer', fontSize: 12 },
+  empty:         { textAlign: 'center', padding: '20px', color: 'rgba(255,255,255,0.3)', fontSize: 14 },
+  fab:           { position: 'absolute', zIndex: 20, bottom: 16, right: 20, width: 50, height: 50, borderRadius: '50%', background: 'white', color: '#0D1117', border: 'none', cursor: 'pointer', fontSize: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 20px rgba(0,0,0,0.45)' },
+  overlay:       { position: 'fixed', inset: 0, zIndex: 200, background: 'rgba(0,0,0,0.72)', display: 'flex', alignItems: 'flex-end' },
+  modal:         { background: '#12171F', borderRadius: '24px 24px 0 0', borderTop: '1px solid rgba(255,255,255,0.08)', padding: '0 20px 44px', width: '100%', maxHeight: '88vh', overflowY: 'auto' },
+  mhandle:       { width: 36, height: 4, background: 'rgba(255,255,255,0.12)', borderRadius: 2, margin: '14px auto 22px' },
+  mtitle:        { fontFamily: 'Georgia,serif', fontSize: 21, color: 'white', marginBottom: 20 },
+  sectionLabel:  { fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'rgba(255,255,255,0.25)', marginBottom: 12, marginTop: 8 },
+  fg:            { marginBottom: 12 },
+  fl:            { fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'rgba(255,255,255,0.35)', marginBottom: 6, display: 'block' },
+  fi:            { width: '100%', padding: '12px 14px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.09)', borderRadius: 12, color: 'white', fontSize: 15, outline: 'none', boxSizing: 'border-box', fontFamily: 'inherit' },
+  acWrap:        { padding: '10px 14px', background: '#181E28', border: '1px solid rgba(255,255,255,0.09)', borderTop: 'none', borderRadius: '0 0 12px 12px' },
+  acList:        { background: '#181E28', border: '1px solid rgba(255,255,255,0.09)', borderTop: 'none', borderRadius: '0 0 12px 12px', overflow: 'hidden' },
+  acItem:        { padding: '11px 14px', cursor: 'pointer', borderBottom: '1px solid rgba(255,255,255,0.05)' },
+  acName:        { fontSize: 14, fontWeight: 500, color: 'white' },
+  acAddr:        { fontSize: 11, color: 'rgba(255,255,255,0.35)', marginTop: 2 },
+  btnP:          { width: '100%', padding: 14, background: 'white', color: '#0D1117', border: 'none', borderRadius: 12, fontSize: 15, fontWeight: 600, cursor: 'pointer', marginTop: 4 },
+  btnG:          { width: '100%', padding: 12, background: 'none', color: 'rgba(255,255,255,0.35)', border: '1px solid rgba(255,255,255,0.09)', borderRadius: 12, fontSize: 14, cursor: 'pointer', marginTop: 8 },
 };
