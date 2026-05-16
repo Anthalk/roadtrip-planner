@@ -44,6 +44,9 @@ const Map = forwardRef(function Map({ etapes = [], spots = [], routes = {}, tigh
       center: [137.5, 36.5],
       zoom: 5,
       zoomControl: false,
+      navigationControl: false,
+      geolocateControl: false,
+      attributionControl: false,
     });
   }, []);
 
@@ -107,9 +110,7 @@ const Map = forwardRef(function Map({ etapes = [], spots = [], routes = {}, tigh
           .setLngLat([e.lon, e.lat])
           .setPopup(
             new maptilersdk.Popup({ offset: 20 }).setHTML(
-              `<strong>${e.nom}</strong><br/>${e.nuits} nuit${
-                e.nuits > 1 ? 's' : ''
-              }`
+              `<strong>${e.nom}</strong><br/>${e.nuits} nuit${e.nuits > 1 ? 's' : ''}`
             )
           )
           .addTo(map.current);
@@ -150,9 +151,7 @@ const Map = forwardRef(function Map({ etapes = [], spots = [], routes = {}, tigh
     if (!map.current || !Object.keys(routes).length) return;
     const intervals = [];
     const draw = () => {
-      const routeEntries = Object.entries(routes).filter(
-        ([_, r]) => r?.coords?.length
-      );
+      const routeEntries = Object.entries(routes).filter(([_, r]) => r?.coords?.length);
       if (!routeEntries.length) return;
       let routeIndex = 0;
       const drawNext = () => {
@@ -185,10 +184,7 @@ const Map = forwardRef(function Map({ etapes = [], spots = [], routes = {}, tigh
         const interval = setInterval(() => {
           i = Math.min(i + step, coords.length);
           const source = map.current.getSource(sourceId);
-          if (!source) {
-            clearInterval(interval);
-            return;
-          }
+          if (!source) { clearInterval(interval); return; }
           source.setData({
             type: 'Feature',
             geometry: { type: 'LineString', coordinates: coords.slice(0, i) },
@@ -209,27 +205,29 @@ const Map = forwardRef(function Map({ etapes = [], spots = [], routes = {}, tigh
   }, [routes]);
 
   return (
-    <div
-      style={{ width: '100%', height: '100%', position: 'absolute', inset: 0 }}
-    >
+    <div style={{ width: '100%', height: '100%', position: 'absolute', inset: 0 }}>
+      <style>{`
+        .maplibregl-ctrl-top-right,
+        .maplibregl-ctrl-top-left,
+        .maplibregl-ctrl-bottom-left,
+        .maplibregl-ctrl-bottom-right,
+        .mapboxgl-ctrl-top-right,
+        .mapboxgl-ctrl-top-left,
+        .mapboxgl-ctrl-bottom-left,
+        .mapboxgl-ctrl-bottom-right {
+          display: none !important;
+        }
+      `}</style>
       <div ref={mapContainer} style={{ position: 'absolute', inset: 0 }} />
-      <div style={{ position: 'absolute', top: 170, right: 0, zIndex: 10 }}>
+      <div style={{ position: 'absolute', top: 16, right: 16, zIndex: 10 }}>
         {showPicker && (
-          <div
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 6,
-              marginBottom: 8,
-            }}
-          >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
             {STYLES.map((s) => (
               <button
                 key={s.id}
                 onClick={() => switchStyle(s.id)}
                 style={{
-                  background:
-                    currentStyle === s.id ? 'white' : 'rgba(10,14,20,0.85)',
+                  background: currentStyle === s.id ? 'white' : 'rgba(10,14,20,0.85)',
                   color: currentStyle === s.id ? '#0D1117' : 'white',
                   border: '1px solid rgba(255,255,255,0.2)',
                   borderRadius: 10,
