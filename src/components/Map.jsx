@@ -29,10 +29,7 @@ const STYLES = [
   { id: 'outdoor', label: 'Relief', style: maptilersdk.MapStyle.OUTDOOR },
 ];
 
-const Map = forwardRef(function Map(
-  { etapes = [], spots = [], routes = {} },
-  ref
-) {
+const Map = forwardRef(function Map({ etapes = [], spots = [], routes = {}, tight = false }, ref) {
   const mapContainer = useRef(null);
   const map = useRef(null);
   const markers = useRef([]);
@@ -46,6 +43,7 @@ const Map = forwardRef(function Map(
       style: maptilersdk.MapStyle.HYBRID_V4,
       center: [137.5, 36.5],
       zoom: 5,
+      zoomControl: false,
     });
   }, []);
 
@@ -138,10 +136,11 @@ const Map = forwardRef(function Map(
 
     const lats = pts.map((p) => p.lat);
     const lons = pts.map((p) => p.lon);
+    const pad = tight ? 0.02 : 0.5;
     map.current.fitBounds(
       [
-        [Math.min(...lons) - 0.5, Math.min(...lats) - 0.5],
-        [Math.max(...lons) + 0.5, Math.max(...lats) + 0.5],
+        [Math.min(...lons) - pad, Math.min(...lats) - pad],
+        [Math.max(...lons) + pad, Math.max(...lats) + pad],
       ],
       { padding: 60, duration: 800 }
     );

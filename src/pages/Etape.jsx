@@ -137,7 +137,7 @@ export default function Etape({ etapeId, voyageId, onBack }) {
       </div>
 
       <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
-        <Map ref={mapRef} etapes={etape ? [etape] : []} spots={spots} />{' '}
+      <Map ref={mapRef} etapes={etape ? [etape] : []} spots={spots} tight={true} />        {' '}
       </div>
 
       <div
