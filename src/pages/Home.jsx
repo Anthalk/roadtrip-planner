@@ -48,10 +48,22 @@ function TabVoyages({ session, onSelectVoyage }) {
 
   const addVoyage = async () => {
     if (!nom) return
-    const { error } = await supabase.from('voyages').insert({ nom, dates, owner_id: session.user.id })
-    if (!error) { setNom(''); setDates(''); setModal(false); fetchVoyages() }
+    const { data, error } = await supabase
+      .from('voyages')
+      .insert({ nom, dates, owner_id: session.user.id })
+      .select('id')
+      .single()
+    
+    if (!error && data) {
+      await supabase.from('voyage_membres').insert({
+        voyage_id: data.id,
+        user_id: session.user.id,
+        role: 'owner',
+      })
+      setNom(''); setDates(''); setModal(false)
+      fetchVoyages()
+    }
   }
-
   const deleteVoyage = async (id, e) => {
     e.stopPropagation()
     await supabase.from('voyages').delete().eq('id', id)
