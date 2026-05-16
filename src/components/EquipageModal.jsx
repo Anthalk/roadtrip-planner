@@ -193,7 +193,7 @@ export default function EquipageModal({ voyageId, session, onClose }) {
 }
 
 const s = {
-  overlay:      { position: 'fixed', inset: 0, zIndex: 200, background: 'rgba(0,0,0,0.72)', display: 'flex', alignItems: 'flex-end' },
+  overlay:      { position: 'fixed', inset: 0, zIndex: 300, background: 'rgba(0,0,0,0.72)', display: 'flex', alignItems: 'flex-end' },
   modal:        { background: '#12171F', borderRadius: '24px 24px 0 0', borderTop: '1px solid rgba(255,255,255,0.08)', padding: '0 20px 44px', width: '100%', maxHeight: '80vh', overflowY: 'auto' },
   mhandle:      { width: 36, height: 4, background: 'rgba(255,255,255,0.12)', borderRadius: 2, margin: '14px auto 18px' },
   header:       { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 },
