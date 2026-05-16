@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import Map from '../components/Map';
 import DateRangePicker from '../components/DateRangePicker';
@@ -18,6 +18,8 @@ export default function Voyage({ voyageId, onSelectEtape, onBack, session }) {
   const [modal, setModal] = useState(false);
   const [editModal, setEditModal] = useState(null);
   const [equipageOpen, setEquipageOpen] = useState(false);
+
+  // Ajout étape
   const [nom, setNom] = useState('');
   const [nuits, setNuits] = useState('2');
   const [suggestions, setSuggestions] = useState([]);
@@ -26,14 +28,13 @@ export default function Voyage({ voyageId, onSelectEtape, onBack, session }) {
   const [routes, setRoutes] = useState({});
   const timer = useRef(null);
 
-  // Edit modal state
-  const [editNom, setEditNom] = useState('');
-  const [editNuits, setEditNuits] = useState('');
+  // Edit modal
   const [editLieuNom, setEditLieuNom] = useState('');
   const [editLieuSelected, setEditLieuSelected] = useState(null);
   const [editLieuSuggestions, setEditLieuSuggestions] = useState([]);
   const [editLieuLoading, setEditLieuLoading] = useState(false);
   const editLieuTimer = useRef(null);
+  const [editNuits, setEditNuits] = useState('');
   const [editHotelNom, setEditHotelNom] = useState('');
   const [editHotelAdresse, setEditHotelAdresse] = useState('');
   const [editHotelConfirmation, setEditHotelConfirmation] = useState('');
@@ -48,14 +49,16 @@ export default function Voyage({ voyageId, onSelectEtape, onBack, session }) {
   const [sheetExpanded, setSheetExpanded] = useState(true);
   const sheetDragStart = useRef(null);
 
-  // Drag & drop étapes
-  const [dragIndex, setDragIndex] = useState(null);
-  const [dragOverIndex, setDragOverIndex] = useState(null);
-  const [isDragging, setIsDragging] = useState(false);
-  const longPressTimer = useRef(null);
-  const dragStartX = useRef(null);
-  const dragStartScrollLeft = useRef(null);
-  const hscrollRef = useRef(null);
+  // Mode réorganisation
+  const [reorgMode, setReorgMode] = useState(false);
+  const [reorgEtapes, setReorgEtapes] = useState([]);
+  const [dragIdx, setDragIdx] = useState(null);       // index de la carte draggée
+  const [dragOverIdx, setDragOverIdx] = useState(null); // index de la position cible
+  const [dragX, setDragX] = useState(0);               // position X du doigt
+  const [dragY, setDragY] = useState(0);               // position Y du doigt
+  const [cardWidth, setCardWidth] = useState(140);
+  const reorgRef = useRef(null);
+  const cardRefs = useRef([]);
 
   useEffect(() => { fetchData(); }, [voyageId]);
 
@@ -77,7 +80,7 @@ export default function Voyage({ voyageId, onSelectEtape, onBack, session }) {
       if (!prev.lat || !curr.lat) continue;
       try {
         const { data, error } = await supabase.functions.invoke('routing', { body: { from: prev, to: curr } });
-        if (!error && data) setRoutes((ro) => ({ ...ro, [curr.id]: data }));
+        if (!error && data) setRoutes(ro => ({ ...ro, [curr.id]: data }));
       } catch {}
     }
   };
@@ -114,7 +117,7 @@ export default function Voyage({ voyageId, onSelectEtape, onBack, session }) {
 
   const addEtape = async () => {
     if (!nom) return;
-    const { error } = await supabase.from('etapes').insert({
+    await supabase.from('etapes').insert({
       voyage_id: voyageId,
       nom: selected?.name || nom,
       lat: selected?.lat || null,
@@ -122,16 +125,16 @@ export default function Voyage({ voyageId, onSelectEtape, onBack, session }) {
       nuits: parseInt(nuits) || 1,
       ordre: etapes.length,
     });
-    if (!error) { setNom(''); setNuits('2'); setSelected(null); setSuggestions([]); setModal(false); fetchData(); }
+    setNom(''); setNuits('2'); setSelected(null); setSuggestions([]); setModal(false);
+    fetchData();
   };
 
   const openEdit = (e) => {
     setEditModal(e);
-    setEditNom(e.nom || '');
-    setEditNuits(String(e.nuits || 1));
     setEditLieuNom(e.nom || '');
     setEditLieuSelected(null);
     setEditLieuSuggestions([]);
+    setEditNuits(String(e.nuits || 1));
     setEditHotelNom(e.hotel_nom || '');
     setEditHotelAdresse(e.hotel_adresse || '');
     setEditHotelConfirmation(e.hotel_confirmation || '');
@@ -144,7 +147,7 @@ export default function Voyage({ voyageId, onSelectEtape, onBack, session }) {
   const saveEdit = async () => {
     if (!editModal) return;
     await supabase.from('etapes').update({
-      nom: editLieuSelected?.name || editLieuNom || editNom,
+      nom: editLieuSelected?.name || editLieuNom,
       lat: editLieuSelected?.lat ?? editModal.lat,
       lon: editLieuSelected?.lon ?? editModal.lon,
       nuits: parseInt(editNuits) || 1,
@@ -164,68 +167,75 @@ export default function Voyage({ voyageId, onSelectEtape, onBack, session }) {
     fetchData();
   };
 
-  // Réordonner les étapes
-  const saveOrder = async (newEtapes) => {
-    await Promise.all(newEtapes.map((e, i) =>
+  // --- Mode réorganisation ---
+  const enterReorg = () => {
+    setReorgEtapes([...etapes]);
+    setReorgMode(true);
+    setSheetExpanded(true);
+  };
+
+  const cancelReorg = () => {
+    setReorgMode(false);
+    setDragIdx(null);
+    setDragOverIdx(null);
+  };
+
+  const saveReorg = async () => {
+    await Promise.all(reorgEtapes.map((e, i) =>
       supabase.from('etapes').update({ ordre: i }).eq('id', e.id)
     ));
+    setEtapes(reorgEtapes);
+    setReorgMode(false);
+    setDragIdx(null);
+    setDragOverIdx(null);
+    fetchRoutes(reorgEtapes);
   };
 
-  // --- Drag & drop handlers ---
-  const handleCardTouchStart = (i, e) => {
-    if (isDragging) return;
+  // Touch handlers pour le drag
+  const onCardTouchStart = (i, e) => {
+    e.stopPropagation();
     const touch = e.touches[0];
-    dragStartX.current = touch.clientX;
-    dragStartScrollLeft.current = hscrollRef.current?.scrollLeft || 0;
-    longPressTimer.current = setTimeout(() => {
-      setIsDragging(true);
-      setDragIndex(i);
-      setDragOverIndex(i);
-      if (navigator.vibrate) navigator.vibrate(40);
-    }, 500);
+    setDragIdx(i);
+    setDragOverIdx(i);
+    setDragX(touch.clientX);
+    setDragY(touch.clientY);
+    if (navigator.vibrate) navigator.vibrate(30);
   };
 
-  const handleCardTouchMove = (i, e) => {
-    if (!isDragging) {
-      // Annuler le long press si l'utilisateur scrolle
-      const touch = e.touches[0];
-      const dx = Math.abs(touch.clientX - dragStartX.current);
-      if (dx > 8) {
-        clearTimeout(longPressTimer.current);
-      }
-      return;
-    }
+  const onCardTouchMove = (e) => {
+    if (dragIdx === null) return;
     e.preventDefault();
     const touch = e.touches[0];
-    const container = hscrollRef.current;
-    if (!container) return;
+    setDragX(touch.clientX);
+    setDragY(touch.clientY);
 
     // Trouver la carte sous le doigt
-    const cards = container.querySelectorAll('[data-card]');
-    let newOver = dragIndex;
+    const container = reorgRef.current;
+    if (!container) return;
+    const cards = cardRefs.current;
+    let newOver = dragIdx;
     cards.forEach((card, idx) => {
+      if (!card) return;
       const rect = card.getBoundingClientRect();
-      if (touch.clientX >= rect.left && touch.clientX <= rect.right) {
+      const centerX = rect.left + rect.width / 2;
+      if (touch.clientX > centerX - rect.width / 2 && touch.clientX < centerX + rect.width / 2) {
         newOver = idx;
       }
     });
-    if (newOver !== dragOverIndex) setDragOverIndex(newOver);
+    if (newOver !== dragOverIdx) {
+      // Réordonner le tableau de preview
+      const newArr = [...reorgEtapes];
+      const [moved] = newArr.splice(dragIdx, 1);
+      newArr.splice(newOver, 0, moved);
+      setReorgEtapes(newArr);
+      setDragIdx(newOver);
+      setDragOverIdx(newOver);
+    }
   };
 
-  const handleCardTouchEnd = () => {
-    clearTimeout(longPressTimer.current);
-    if (!isDragging) return;
-
-    if (dragIndex !== null && dragOverIndex !== null && dragIndex !== dragOverIndex) {
-      const newEtapes = [...etapes];
-      const [moved] = newEtapes.splice(dragIndex, 1);
-      newEtapes.splice(dragOverIndex, 0, moved);
-      setEtapes(newEtapes);
-      saveOrder(newEtapes);
-    }
-    setIsDragging(false);
-    setDragIndex(null);
-    setDragOverIndex(null);
+  const onCardTouchEnd = () => {
+    setDragIdx(null);
+    setDragOverIdx(null);
   };
 
   // Sheet drag
@@ -240,7 +250,7 @@ export default function Voyage({ voyageId, onSelectEtape, onBack, session }) {
   };
 
   const totalNuits = etapes.reduce((s, e) => s + (e.nuits || 0), 0);
-  const SHEET_EXPANDED = '42vh';
+  const SHEET_EXPANDED = reorgMode ? '52vh' : '42vh';
   const SHEET_COLLAPSED = '14vh';
 
   return (
@@ -256,21 +266,17 @@ export default function Voyage({ voyageId, onSelectEtape, onBack, session }) {
 
       {/* Carte */}
       <div style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column' }}>
-        <Map etapes={etapes} routes={routes} />
+        <Map etapes={reorgMode ? reorgEtapes : etapes} routes={reorgMode ? {} : routes} />
       </div>
 
-      {/* Indicateur drag actif */}
-      {isDragging && (
-        <div style={s.dragHint}>Glisse pour réorganiser</div>
-      )}
-
       {/* Sheet */}
-      <div style={{ ...s.sheet, height: sheetExpanded ? SHEET_EXPANDED : SHEET_COLLAPSED, transition: isDragging ? 'none' : 'height 0.35s cubic-bezier(0.4,0,0.2,1)', overflow: 'hidden', flexShrink: 0 }}>
-        <div style={s.handleWrap} onMouseDown={onSheetDragStart} onMouseUp={onSheetDragEnd} onTouchStart={onSheetDragStart} onTouchEnd={onSheetDragEnd} onClick={() => setSheetExpanded(e => !e)}>
+      <div style={{ ...s.sheet, height: sheetExpanded ? SHEET_EXPANDED : SHEET_COLLAPSED, transition: 'height 0.35s cubic-bezier(0.4,0,0.2,1)', overflow: 'hidden', flexShrink: 0 }}>
+        <div style={s.handleWrap} onMouseDown={onSheetDragStart} onMouseUp={onSheetDragEnd} onTouchStart={onSheetDragStart} onTouchEnd={onSheetDragEnd} onClick={() => !reorgMode && setSheetExpanded(e => !e)}>
           <div style={s.handle} />
         </div>
 
-        {!sheetExpanded && (
+        {/* Vue réduite (non dispo en mode reorg) */}
+        {!sheetExpanded && !reorgMode && (
           <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', width: '100%' }}>
             <div style={s.miniScroll}>
               {etapes.map((e, i) => {
@@ -295,11 +301,20 @@ export default function Voyage({ voyageId, onSelectEtape, onBack, session }) {
           </div>
         )}
 
-        {sheetExpanded && (
+        {/* Vue normale */}
+        {sheetExpanded && !reorgMode && (
           <>
             <div style={s.sheetHeader}>
               <span style={s.sheetTitle}>Étapes</span>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                {etapes.length > 1 && (
+                  <button style={s.reorgBtn} onClick={enterReorg}>
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
+                    </svg>
+                    Réorganiser
+                  </button>
+                )}
                 <button style={s.equipageBtn} onClick={() => setEquipageOpen(true)}>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <circle cx="9" cy="7" r="4"/>
@@ -307,7 +322,7 @@ export default function Voyage({ voyageId, onSelectEtape, onBack, session }) {
                     <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
                     <path d="M21 21v-2a4 4 0 0 0-3-3.87"/>
                   </svg>
-                  <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.6)', marginLeft: 5 }}>Équipage</span>
+                  Équipage
                 </button>
                 <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)', cursor: 'pointer' }} onClick={() => setSheetExpanded(false)}>▾</span>
               </div>
@@ -318,27 +333,13 @@ export default function Voyage({ voyageId, onSelectEtape, onBack, session }) {
             ) : etapes.length === 0 ? (
               <div style={s.empty}>Ajoute ta première étape</div>
             ) : (
-              <div
-                ref={hscrollRef}
-                style={{ ...s.hscroll, overflowX: isDragging ? 'hidden' : 'auto' }}
-                onTouchEnd={handleCardTouchEnd}
-              >
+              <div style={s.hscroll}>
                 {etapes.map((e, i) => {
                   const prev = etapes[i - 1];
                   const route = routes[e.id];
-                  const isBeingDragged = isDragging && dragIndex === i;
-                  const isDropTarget = isDragging && dragOverIndex === i && dragIndex !== i;
-
                   return (
-                    <div
-                      key={e.id}
-                      data-card={i}
-                      style={{ display: 'flex', alignItems: 'center', flexShrink: 0, transition: 'transform 0.2s' }}
-                      onTouchStart={ev => handleCardTouchStart(i, ev)}
-                      onTouchMove={ev => handleCardTouchMove(i, ev)}
-                      onTouchEnd={handleCardTouchEnd}
-                    >
-                      {i > 0 && !isDragging && (
+                    <div key={e.id} style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+                      {i > 0 && (
                         <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
                           <div style={{ height: 1, width: 10, background: 'rgba(255,255,255,0.15)' }} />
                           <div style={s.routePill}>
@@ -359,27 +360,13 @@ export default function Voyage({ voyageId, onSelectEtape, onBack, session }) {
                           <div style={{ height: 1, width: 10, background: 'rgba(255,255,255,0.15)' }} />
                         </div>
                       )}
-                      {isDragging && i > 0 && (
-                        <div style={{ width: 12, flexShrink: 0 }} />
-                      )}
                       <div
-                        style={{
-                          ...s.ecard,
-                          backgroundImage: `linear-gradient(to bottom, rgba(10,14,20,0.3) 0%, rgba(10,14,20,0.85) 60%, rgba(10,14,20,0.97) 100%), url(https://source.unsplash.com/200x300/?${encodeURIComponent(e.nom)},japan)`,
-                          backgroundSize: 'cover',
-                          backgroundPosition: 'center',
-                          transform: isBeingDragged ? 'scale(1.05) rotate(1.5deg)' : isDropTarget ? 'translateX(8px)' : 'none',
-                          opacity: isBeingDragged ? 0.85 : 1,
-                          boxShadow: isBeingDragged ? '0 20px 50px rgba(0,0,0,0.7)' : '0 8px 32px rgba(0,0,0,0.4)',
-                          transition: isBeingDragged ? 'none' : 'transform 0.2s, opacity 0.2s, box-shadow 0.2s',
-                          cursor: isDragging ? 'grabbing' : 'pointer',
-                          outline: isDropTarget ? '2px solid rgba(255,255,255,0.3)' : 'none',
-                        }}
-                        onClick={() => { if (!isDragging) onSelectEtape(e.id); }}
-                        onMouseEnter={ev => { if (!isDragging) { ev.currentTarget.style.transform = 'translateY(-4px)'; ev.currentTarget.style.boxShadow = '0 16px 40px rgba(0,0,0,0.5)'; }}}
-                        onMouseLeave={ev => { if (!isDragging) { ev.currentTarget.style.transform = 'translateY(0px)'; ev.currentTarget.style.boxShadow = '0 8px 32px rgba(0,0,0,0.4)'; }}}
+                        style={{ ...s.ecard, backgroundImage: `linear-gradient(to bottom, rgba(10,14,20,0.3) 0%, rgba(10,14,20,0.85) 60%, rgba(10,14,20,0.97) 100%), url(https://source.unsplash.com/200x300/?${encodeURIComponent(e.nom)},japan)`, backgroundSize: 'cover', backgroundPosition: 'center' }}
+                        onClick={() => onSelectEtape(e.id)}
+                        onMouseEnter={ev => { ev.currentTarget.style.transform = 'translateY(-4px)'; ev.currentTarget.style.boxShadow = '0 16px 40px rgba(0,0,0,0.5)'; }}
+                        onMouseLeave={ev => { ev.currentTarget.style.transform = 'translateY(0px)'; ev.currentTarget.style.boxShadow = '0 8px 32px rgba(0,0,0,0.4)'; }}
                       >
-                        {!isDragging && <button style={s.delBtn} onClick={ev => deleteEtape(e.id, ev)}>✕</button>}
+                        <button style={s.delBtn} onClick={ev => deleteEtape(e.id, ev)}>✕</button>
                         <div style={s.ecardName}>{e.nom}</div>
                         <div style={s.ecardNuits}>{e.nuits} nuit{e.nuits > 1 ? 's' : ''} · {e.nuits + 1} jour{e.nuits + 1 > 1 ? 's' : ''}</div>
                         <div style={s.ecardSection}>
@@ -400,12 +387,7 @@ export default function Voyage({ voyageId, onSelectEtape, onBack, session }) {
                           )}
                         </div>
                         <div style={s.ecardDivider} />
-                        {!isDragging && (
-                          <button style={s.editBtn} onClick={ev => { ev.stopPropagation(); openEdit(e); }}>Éditer l'étape</button>
-                        )}
-                        {isDragging && (
-                          <div style={{ textAlign: 'center', fontSize: 10, color: 'rgba(255,255,255,0.3)', padding: '4px 0' }}>≡ glisser</div>
-                        )}
+                        <button style={s.editBtn} onClick={ev => { ev.stopPropagation(); openEdit(e); }}>Éditer l'étape</button>
                       </div>
                     </div>
                   );
@@ -414,10 +396,63 @@ export default function Voyage({ voyageId, onSelectEtape, onBack, session }) {
             )}
           </>
         )}
+
+        {/* Mode réorganisation */}
+        {sheetExpanded && reorgMode && (
+          <>
+            <div style={s.sheetHeader}>
+              <span style={s.sheetTitle}>Réorganiser</span>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button style={s.reorgCancelBtn} onClick={cancelReorg}>Annuler</button>
+                <button style={s.reorgSaveBtn} onClick={saveReorg}>Valider</button>
+              </div>
+            </div>
+            <div style={{ padding: '6px 16px 8px', fontSize: 11, color: 'rgba(255,255,255,0.3)', textAlign: 'center' }}>
+              Appuie et glisse pour changer l'ordre
+            </div>
+            <div
+              ref={reorgRef}
+              style={s.reorgScroll}
+              onTouchMove={onCardTouchMove}
+              onTouchEnd={onCardTouchEnd}
+            >
+              {reorgEtapes.map((e, i) => {
+                const isDragged = dragIdx === i;
+                return (
+                  <div
+                    key={e.id}
+                    ref={el => cardRefs.current[i] = el}
+                    style={{
+                      ...s.reorgCard,
+                      transform: isDragged
+                        ? `scale(1.06) translateY(-6px)`
+                        : 'scale(1) translateY(0)',
+                      boxShadow: isDragged
+                        ? '0 20px 50px rgba(0,0,0,0.7)'
+                        : '0 4px 16px rgba(0,0,0,0.4)',
+                      border: isDragged
+                        ? '1px solid rgba(255,255,255,0.3)'
+                        : '1px solid rgba(255,255,255,0.1)',
+                      zIndex: isDragged ? 10 : 1,
+                      transition: isDragged ? 'box-shadow 0.15s, border 0.15s' : 'all 0.2s cubic-bezier(0.4,0,0.2,1)',
+                      background: isDragged ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.06)',
+                    }}
+                    onTouchStart={ev => onCardTouchStart(i, ev)}
+                  >
+                    <div style={s.reorgCardIndex}>{i + 1}</div>
+                    <div style={s.reorgCardName}>{e.nom}</div>
+                    <div style={s.reorgCardNuits}>{e.nuits} nuit{e.nuits > 1 ? 's' : ''}</div>
+                    <div style={s.reorgHandle}>⠿</div>
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
       </div>
 
-      {/* FAB */}
-      <button style={s.fab} onClick={() => setModal(true)}>+</button>
+      {/* FAB — masqué en mode reorg */}
+      {!reorgMode && <button style={s.fab} onClick={() => setModal(true)}>+</button>}
 
       {/* Modal équipage */}
       {equipageOpen && (
@@ -532,15 +567,26 @@ const s = {
   app:           { position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column', background: '#0D1117' },
   topbar:        { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10, padding: '16px 20px 0', display: 'flex', alignItems: 'flex-start', gap: 12, pointerEvents: 'none' },
   backBtn:       { width: 40, height: 40, borderRadius: '50%', background: 'rgba(255,255,255,0.1)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255,255,255,0.15)', color: 'white', cursor: 'pointer', fontSize: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, pointerEvents: 'all' },
-  equipageBtn:   { background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 20, color: 'rgba(255,255,255,0.7)', cursor: 'pointer', padding: '5px 12px', display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontFamily: 'inherit' },
   title:         { fontFamily: 'Georgia,serif', fontSize: 22, color: 'white', textShadow: '0 2px 16px rgba(0,0,0,0.6)' },
   sub:           { fontSize: 12, color: 'rgba(255,255,255,0.4)', marginTop: 2 },
-  dragHint:      { position: 'absolute', top: 16, left: '50%', transform: 'translateX(-50%)', background: 'rgba(255,255,255,0.12)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 12, padding: '8px 16px', color: 'white', fontSize: 12, zIndex: 50, pointerEvents: 'none' },
   sheet:         { background: 'rgba(10,14,20,0.95)', backdropFilter: 'blur(24px)', borderRadius: '22px 22px 0 0', borderTop: '1px solid rgba(255,255,255,0.07)', position: 'relative', zIndex: 10, display: 'flex', flexDirection: 'column' },
   handleWrap:    { padding: '10px 0 4px', cursor: 'grab', userSelect: 'none' },
   handle:        { width: 36, height: 4, background: 'rgba(255,255,255,0.15)', borderRadius: 2, margin: '0 auto' },
   sheetHeader:   { padding: '4px 20px 6px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
   sheetTitle:    { fontFamily: 'Georgia,serif', fontSize: 15, color: 'rgba(255,255,255,0.8)' },
+  equipageBtn:   { background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 20, color: 'rgba(255,255,255,0.7)', cursor: 'pointer', padding: '5px 10px', display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, fontFamily: 'inherit' },
+  reorgBtn:      { background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 20, color: 'rgba(255,255,255,0.7)', cursor: 'pointer', padding: '5px 10px', display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, fontFamily: 'inherit' },
+  reorgSaveBtn:  { background: 'white', border: 'none', borderRadius: 20, color: '#0D1117', cursor: 'pointer', padding: '6px 14px', fontSize: 12, fontWeight: 600, fontFamily: 'inherit' },
+  reorgCancelBtn:{ background: 'none', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 20, color: 'rgba(255,255,255,0.5)', cursor: 'pointer', padding: '6px 14px', fontSize: 12, fontFamily: 'inherit' },
+
+  // Mode reorg
+  reorgScroll:   { overflowX: 'auto', display: 'flex', gap: 10, padding: '8px 20px 20px', scrollbarWidth: 'none', touchAction: 'none' },
+  reorgCard:     { flexShrink: 0, width: 110, borderRadius: 14, padding: '12px 10px', cursor: 'grab', position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, userSelect: 'none' },
+  reorgCardIndex:{ fontSize: 10, color: 'rgba(255,255,255,0.3)', fontWeight: 600 },
+  reorgCardName: { fontFamily: 'Georgia,serif', fontSize: 14, color: 'white', textAlign: 'center', lineHeight: 1.2 },
+  reorgCardNuits:{ fontSize: 10, color: 'rgba(255,255,255,0.4)' },
+  reorgHandle:   { fontSize: 16, color: 'rgba(255,255,255,0.2)', marginTop: 4, letterSpacing: 2 },
+
   hscroll:       { overflowX: 'auto', display: 'flex', alignItems: 'center', gap: 0, padding: '10px 20px 20px', scrollbarWidth: 'none' },
   miniScroll:    { overflowX: 'auto', display: 'flex', alignItems: 'center', padding: '0 16px', scrollbarWidth: 'none', gap: 0, maxWidth: '100%' },
   miniCard:      { background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10, padding: '5px 10px', flexShrink: 0, cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 },
@@ -549,7 +595,7 @@ const s = {
   miniConnector: { display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '0 4px', flexShrink: 0 },
   miniConnectorLine: { height: 1, width: 16, background: 'rgba(255,255,255,0.15)' },
   miniConnectorText: { fontSize: 9, color: 'rgba(255,255,255,0.4)', whiteSpace: 'nowrap', padding: '2px 0' },
-  ecard:         { background: 'rgba(255,255,255,0.055)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 18, padding: '14px 16px', width: 200, cursor: 'pointer', flexShrink: 0, position: 'relative', boxShadow: '0 8px 32px rgba(0,0,0,0.4), 0 2px 8px rgba(0,0,0,0.2)' },
+  ecard:         { background: 'rgba(255,255,255,0.055)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 18, padding: '14px 16px', width: 200, cursor: 'pointer', flexShrink: 0, position: 'relative', boxShadow: '0 8px 32px rgba(0,0,0,0.4)', transition: 'transform 0.2s ease, box-shadow 0.2s ease' },
   ecardName:     { fontFamily: 'Georgia,serif', fontSize: 17, color: 'white', marginBottom: 4, paddingRight: 20 },
   ecardNuits:    { fontSize: 11, color: 'rgba(255,255,255,0.5)', marginBottom: 10 },
   ecardSection:  { marginBottom: 10 },
