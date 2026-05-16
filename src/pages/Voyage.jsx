@@ -52,13 +52,14 @@ export default function Voyage({ voyageId, onSelectEtape, onBack, session }) {
   // Mode réorganisation
   const [reorgMode, setReorgMode] = useState(false);
   const [reorgEtapes, setReorgEtapes] = useState([]);
-  const [dragIdx, setDragIdx] = useState(null);       // index de la carte draggée
-  const [dragOverIdx, setDragOverIdx] = useState(null); // index de la position cible
-  const [dragX, setDragX] = useState(0);               // position X du doigt
-  const [dragY, setDragY] = useState(0);               // position Y du doigt
-  const [cardWidth, setCardWidth] = useState(140);
-  const reorgRef = useRef(null);
+
+  // Drag state
+  const [dragIdx, setDragIdx] = useState(null);
+  const [dropIdx, setDropIdx] = useState(null);
+  const [dragPos, setDragPos] = useState({ x: 0, y: 0 }); // position fixed de la carte fantôme
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 }); // offset doigt/coin carte
   const cardRefs = useRef([]);
+  const reorgScrollRef = useRef(null);
 
   useEffect(() => { fetchData(); }, [voyageId]);
 
@@ -177,7 +178,7 @@ export default function Voyage({ voyageId, onSelectEtape, onBack, session }) {
   const cancelReorg = () => {
     setReorgMode(false);
     setDragIdx(null);
-    setDragOverIdx(null);
+    setDropIdx(null);
   };
 
   const saveReorg = async () => {
@@ -187,58 +188,63 @@ export default function Voyage({ voyageId, onSelectEtape, onBack, session }) {
     setEtapes(reorgEtapes);
     setReorgMode(false);
     setDragIdx(null);
-    setDragOverIdx(null);
+    setDropIdx(null);
     fetchRoutes(reorgEtapes);
   };
 
-  // Touch handlers pour le drag
-  const onCardTouchStart = (i, e) => {
-    e.stopPropagation();
-    const touch = e.touches[0];
+  // --- Drag handlers ---
+  const onCardTouchStart = (i, ev) => {
+    const touch = ev.touches[0];
+    const card = cardRefs.current[i];
+    if (!card) return;
+    const rect = card.getBoundingClientRect();
+
     setDragIdx(i);
-    setDragOverIdx(i);
-    setDragX(touch.clientX);
-    setDragY(touch.clientY);
+    setDropIdx(i);
+    setDragOffset({ x: touch.clientX - rect.left, y: touch.clientY - rect.top });
+    setDragPos({ x: rect.left, y: rect.top });
+
     if (navigator.vibrate) navigator.vibrate(30);
   };
 
-  const onCardTouchMove = (e) => {
+  const onContainerTouchMove = (ev) => {
     if (dragIdx === null) return;
-    e.preventDefault();
-    const touch = e.touches[0];
-    setDragX(touch.clientX);
-    setDragY(touch.clientY);
+    const touch = ev.touches[0];
 
-    // Trouver la carte sous le doigt
-    const container = reorgRef.current;
-    if (!container) return;
-    const cards = cardRefs.current;
-    let newOver = dragIdx;
-    cards.forEach((card, idx) => {
-      if (!card) return;
+    // Mettre à jour position de la carte fantôme
+    setDragPos({
+      x: touch.clientX - dragOffset.x,
+      y: touch.clientY - dragOffset.y,
+    });
+
+    // Trouver la cible en dessous
+    let newDrop = dropIdx;
+    cardRefs.current.forEach((card, idx) => {
+      if (!card || idx === dragIdx) return;
       const rect = card.getBoundingClientRect();
       const centerX = rect.left + rect.width / 2;
-      if (touch.clientX > centerX - rect.width / 2 && touch.clientX < centerX + rect.width / 2) {
-        newOver = idx;
+      if (touch.clientX > centerX - rect.width / 2 && touch.clientX <= centerX + rect.width / 2) {
+        newDrop = idx;
       }
     });
-    if (newOver !== dragOverIdx) {
-      // Réordonner le tableau de preview
+    if (newDrop !== dropIdx) setDropIdx(newDrop);
+  };
+
+  const onContainerTouchEnd = () => {
+    if (dragIdx === null) return;
+
+    if (dropIdx !== null && dropIdx !== dragIdx) {
       const newArr = [...reorgEtapes];
       const [moved] = newArr.splice(dragIdx, 1);
-      newArr.splice(newOver, 0, moved);
+      newArr.splice(dropIdx, 0, moved);
       setReorgEtapes(newArr);
-      setDragIdx(newOver);
-      setDragOverIdx(newOver);
     }
-  };
 
-  const onCardTouchEnd = () => {
     setDragIdx(null);
-    setDragOverIdx(null);
+    setDropIdx(null);
   };
 
-  // Sheet drag
+  // Sheet drag (pour expand/collapse)
   const onSheetDragStart = (e) => { sheetDragStart.current = e.touches ? e.touches[0].clientY : e.clientY; };
   const onSheetDragEnd = (e) => {
     if (sheetDragStart.current === null) return;
@@ -252,6 +258,9 @@ export default function Voyage({ voyageId, onSelectEtape, onBack, session }) {
   const totalNuits = etapes.reduce((s, e) => s + (e.nuits || 0), 0);
   const SHEET_EXPANDED = reorgMode ? '52vh' : '42vh';
   const SHEET_COLLAPSED = '14vh';
+
+  // Carte fantôme pendant le drag
+  const draggedEtape = dragIdx !== null ? reorgEtapes[dragIdx] : null;
 
   return (
     <div style={s.app}>
@@ -269,13 +278,39 @@ export default function Voyage({ voyageId, onSelectEtape, onBack, session }) {
         <Map etapes={reorgMode ? reorgEtapes : etapes} routes={reorgMode ? {} : routes} />
       </div>
 
+      {/* Carte fantôme pendant le drag */}
+      {dragIdx !== null && draggedEtape && (
+        <div style={{
+          position: 'fixed',
+          left: dragPos.x,
+          top: dragPos.y,
+          width: 110,
+          zIndex: 999,
+          pointerEvents: 'none',
+          borderRadius: 14,
+          padding: '12px 10px',
+          background: 'rgba(255,255,255,0.18)',
+          border: '1.5px solid rgba(255,255,255,0.35)',
+          boxShadow: '0 24px 60px rgba(0,0,0,0.8)',
+          transform: 'scale(1.08) rotate(2deg)',
+          backdropFilter: 'blur(8px)',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: 4,
+        }}>
+          <div style={{ fontSize: 14, fontFamily: 'Georgia,serif', color: 'white', textAlign: 'center', lineHeight: 1.2 }}>{draggedEtape.nom}</div>
+          <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.5)' }}>{draggedEtape.nuits} nuit{draggedEtape.nuits > 1 ? 's' : ''}</div>
+        </div>
+      )}
+
       {/* Sheet */}
       <div style={{ ...s.sheet, height: sheetExpanded ? SHEET_EXPANDED : SHEET_COLLAPSED, transition: 'height 0.35s cubic-bezier(0.4,0,0.2,1)', overflow: 'hidden', flexShrink: 0 }}>
         <div style={s.handleWrap} onMouseDown={onSheetDragStart} onMouseUp={onSheetDragEnd} onTouchStart={onSheetDragStart} onTouchEnd={onSheetDragEnd} onClick={() => !reorgMode && setSheetExpanded(e => !e)}>
           <div style={s.handle} />
         </div>
 
-        {/* Vue réduite (non dispo en mode reorg) */}
+        {/* Vue réduite */}
         {!sheetExpanded && !reorgMode && (
           <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', width: '100%' }}>
             <div style={s.miniScroll}>
@@ -309,14 +344,14 @@ export default function Voyage({ voyageId, onSelectEtape, onBack, session }) {
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 {etapes.length > 1 && (
                   <button style={s.reorgBtn} onClick={enterReorg}>
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
                       <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
                     </svg>
                     Réorganiser
                   </button>
                 )}
                 <button style={s.equipageBtn} onClick={() => setEquipageOpen(true)}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <circle cx="9" cy="7" r="4"/>
                     <path d="M3 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2"/>
                     <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
@@ -407,35 +442,28 @@ export default function Voyage({ voyageId, onSelectEtape, onBack, session }) {
                 <button style={s.reorgSaveBtn} onClick={saveReorg}>Valider</button>
               </div>
             </div>
-            <div style={{ padding: '6px 16px 8px', fontSize: 11, color: 'rgba(255,255,255,0.3)', textAlign: 'center' }}>
-              Appuie et glisse pour changer l'ordre
+            <div style={{ padding: '4px 20px 6px', fontSize: 11, color: 'rgba(255,255,255,0.3)', textAlign: 'center' }}>
+              Maintiens et glisse pour changer l'ordre
             </div>
             <div
-              ref={reorgRef}
+              ref={reorgScrollRef}
               style={s.reorgScroll}
-              onTouchMove={onCardTouchMove}
-              onTouchEnd={onCardTouchEnd}
+              onTouchMove={onContainerTouchMove}
+              onTouchEnd={onContainerTouchEnd}
             >
               {reorgEtapes.map((e, i) => {
-                const isDragged = dragIdx === i;
+                const isGhost = dragIdx === i; // carte "source" rendue transparente
+                const isTarget = dropIdx === i && dragIdx !== null && dragIdx !== i;
                 return (
                   <div
                     key={e.id}
                     ref={el => cardRefs.current[i] = el}
                     style={{
                       ...s.reorgCard,
-                      transform: isDragged
-                        ? `scale(1.06) translateY(-6px)`
-                        : 'scale(1) translateY(0)',
-                      boxShadow: isDragged
-                        ? '0 20px 50px rgba(0,0,0,0.7)'
-                        : '0 4px 16px rgba(0,0,0,0.4)',
-                      border: isDragged
-                        ? '1px solid rgba(255,255,255,0.3)'
-                        : '1px solid rgba(255,255,255,0.1)',
-                      zIndex: isDragged ? 10 : 1,
-                      transition: isDragged ? 'box-shadow 0.15s, border 0.15s' : 'all 0.2s cubic-bezier(0.4,0,0.2,1)',
-                      background: isDragged ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.06)',
+                      opacity: isGhost ? 0.25 : 1,
+                      transform: isTarget ? 'translateX(6px) scale(1.02)' : 'none',
+                      outline: isTarget ? '2px dashed rgba(255,255,255,0.25)' : 'none',
+                      transition: isGhost ? 'none' : 'all 0.18s cubic-bezier(0.4,0,0.2,1)',
                     }}
                     onTouchStart={ev => onCardTouchStart(i, ev)}
                   >
@@ -451,7 +479,7 @@ export default function Voyage({ voyageId, onSelectEtape, onBack, session }) {
         )}
       </div>
 
-      {/* FAB — masqué en mode reorg */}
+      {/* FAB */}
       {!reorgMode && <button style={s.fab} onClick={() => setModal(true)}>+</button>}
 
       {/* Modal équipage */}
@@ -578,15 +606,12 @@ const s = {
   reorgBtn:      { background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 20, color: 'rgba(255,255,255,0.7)', cursor: 'pointer', padding: '5px 10px', display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, fontFamily: 'inherit' },
   reorgSaveBtn:  { background: 'white', border: 'none', borderRadius: 20, color: '#0D1117', cursor: 'pointer', padding: '6px 14px', fontSize: 12, fontWeight: 600, fontFamily: 'inherit' },
   reorgCancelBtn:{ background: 'none', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 20, color: 'rgba(255,255,255,0.5)', cursor: 'pointer', padding: '6px 14px', fontSize: 12, fontFamily: 'inherit' },
-
-  // Mode reorg
-  reorgScroll:   { overflowX: 'auto', display: 'flex', gap: 10, padding: '8px 20px 20px', scrollbarWidth: 'none', touchAction: 'none' },
-  reorgCard:     { flexShrink: 0, width: 110, borderRadius: 14, padding: '12px 10px', cursor: 'grab', position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, userSelect: 'none' },
+  reorgScroll:   { overflowX: 'auto', display: 'flex', gap: 10, padding: '8px 20px 20px', scrollbarWidth: 'none' },
+  reorgCard:     { flexShrink: 0, width: 110, borderRadius: 14, padding: '12px 10px', background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.1)', cursor: 'grab', position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, userSelect: 'none' },
   reorgCardIndex:{ fontSize: 10, color: 'rgba(255,255,255,0.3)', fontWeight: 600 },
-  reorgCardName: { fontFamily: 'Georgia,serif', fontSize: 14, color: 'white', textAlign: 'center', lineHeight: 1.2 },
+  reorgCardName: { fontFamily: 'Georgia,serif', fontSize: 13, color: 'white', textAlign: 'center', lineHeight: 1.2 },
   reorgCardNuits:{ fontSize: 10, color: 'rgba(255,255,255,0.4)' },
   reorgHandle:   { fontSize: 16, color: 'rgba(255,255,255,0.2)', marginTop: 4, letterSpacing: 2 },
-
   hscroll:       { overflowX: 'auto', display: 'flex', alignItems: 'center', gap: 0, padding: '10px 20px 20px', scrollbarWidth: 'none' },
   miniScroll:    { overflowX: 'auto', display: 'flex', alignItems: 'center', padding: '0 16px', scrollbarWidth: 'none', gap: 0, maxWidth: '100%' },
   miniCard:      { background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10, padding: '5px 10px', flexShrink: 0, cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 },
