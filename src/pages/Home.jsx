@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import Map from '../components/Map'
+import TabCopains from '../components/TabCopains'
+
 
 // --- Icônes SVG inline ---
 const IconMap = ({ active }) => (
@@ -107,18 +109,6 @@ function TabVoyages({ session, onSelectVoyage }) {
           </div>
         </div>
       )}
-    </>
-  )
-}
-
-// --- Onglet Copains (placeholder) ---
-function TabCopains({ session }) {
-  return (
-    <>
-      <div style={s.sheetHeader}>
-        <span style={s.sheetTitle}>Copains</span>
-      </div>
-      <div style={s.empty}>Bientôt disponible</div>
     </>
   )
 }
