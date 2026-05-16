@@ -1,0 +1,9 @@
+{
+  "name": "Road Trip Planner",
+  "short_name": "Road Trip",
+  "display": "standalone",
+  "background_color": "#0D1117",
+  "theme_color": "#0D1117",
+  "start_url": "/",
+  "icons": []
+}
