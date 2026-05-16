@@ -206,11 +206,16 @@ export default function Voyage({ voyageId, onSelectEtape, onBack, session }) {
 
         {sheetExpanded && (
           <>
-            <div style={s.sheetHeader}>
-              <span style={s.sheetTitle}>Étapes</span>
-              <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)', cursor: 'pointer' }} onClick={() => setSheetExpanded(false)}>▾</span>
-            </div>
-
+<div style={s.sheetHeader}>
+  <span style={s.sheetTitle}>Étapes</span>
+  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+    <button style={s.equipageBtn} onClick={() => setEquipageOpen(true)}>
+      <IconUsers />
+      <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.6)', marginLeft: 5 }}>Équipage</span>
+    </button>
+    <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)', cursor: 'pointer' }} onClick={() => setSheetExpanded(false)}>▾</span>
+  </div>
+</div>
             {loading ? (
               <div style={s.empty}>Chargement…</div>
             ) : etapes.length === 0 ? (
