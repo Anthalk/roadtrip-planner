@@ -163,9 +163,6 @@ export default function Voyage({ voyageId, onSelectEtape, onBack, session }) {
           <div style={s.title}>{voyage?.nom}</div>
           <div style={s.sub}>{etapes.length} étape{etapes.length !== 1 ? 's' : ''} · {totalNuits} nuits</div>
         </div>
-        <button style={s.equipageBtn} onClick={() => setEquipageOpen(true)}>
-          <IconUsers />
-        </button>
       </div>
 
       {/* Carte */}
