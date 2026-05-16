@@ -37,6 +37,7 @@ export default function EquipageModal({ voyageId, session, onClose }) {
   const userId = session.user.id
 
   const fetchData = useCallback(async () => {
+    console.log('voyageId:', voyageId)
     setLoading(true)
 
     // 1. Membres actuels du voyage
