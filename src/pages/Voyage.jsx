@@ -207,8 +207,12 @@ export default function Voyage({ voyageId, onSelectEtape, onBack, session }) {
   <span style={s.sheetTitle}>Étapes</span>
   <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
     <button style={s.equipageBtn} onClick={() => setEquipageOpen(true)}>
-      <IconUsers />
-      <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.6)', marginLeft: 5 }}>Équipage</span>
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+  <circle cx="9" cy="7" r="4"/>
+  <path d="M3 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2"/>
+  <line x1="19" y1="8" x2="19" y2="14"/>
+  <line x1="16" y1="11" x2="22" y2="11"/>
+</svg>      <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.6)', marginLeft: 5 }}>Équipage</span>
     </button>
     <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)', cursor: 'pointer' }} onClick={() => setSheetExpanded(false)}>▾</span>
   </div>
@@ -379,8 +383,7 @@ const s = {
   app:          { position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column', background: '#0D1117' },
   topbar:       { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10, padding: '16px 20px 0', display: 'flex', alignItems: 'flex-start', gap: 12, pointerEvents: 'none' },
   backBtn:      { width: 40, height: 40, borderRadius: '50%', background: 'rgba(255,255,255,0.1)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255,255,255,0.15)', color: 'white', cursor: 'pointer', fontSize: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, pointerEvents: 'all' },
-  equipageBtn:  { width: 40, height: 40, borderRadius: '50%', background: 'rgba(255,255,255,0.1)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255,255,255,0.15)', color: 'white', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, pointerEvents: 'all' },
-  title:        { fontFamily: 'Georgia,serif', fontSize: 22, color: 'white', textShadow: '0 2px 16px rgba(0,0,0,0.6)' },
+  equipageBtn: { background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 20, color: 'rgba(255,255,255,0.7)', cursor: 'pointer', padding: '5px 12px', display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontFamily: 'inherit' },  title:        { fontFamily: 'Georgia,serif', fontSize: 22, color: 'white', textShadow: '0 2px 16px rgba(0,0,0,0.6)' },
   sub:          { fontSize: 12, color: 'rgba(255,255,255,0.4)', marginTop: 2 },
   sheet:        { background: 'rgba(10,14,20,0.95)', backdropFilter: 'blur(24px)', borderRadius: '22px 22px 0 0', borderTop: '1px solid rgba(255,255,255,0.07)', position: 'relative', zIndex: 10, display: 'flex', flexDirection: 'column' },
   handleWrap:   { padding: '10px 0 4px', cursor: 'grab', userSelect: 'none' },
