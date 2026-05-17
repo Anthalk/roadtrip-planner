@@ -462,8 +462,7 @@ if (container) {
             </div>
             <div
               ref={reorgScrollRef}
-              style={s.reorgScroll}
-              onTouchMove={onContainerTouchMove}
+              style={{ ...s.reorgScroll, touchAction: dragIdx !== null ? 'none' : 'pan-x' }}              onTouchMove={onContainerTouchMove}
               onTouchEnd={onContainerTouchEnd}
             >
               {reorgEtapes.map((e, i) => {
