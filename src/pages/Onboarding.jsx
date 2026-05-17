@@ -66,7 +66,7 @@ export default function Onboarding({ session, onComplete }) {
         <div style={s.sub}>Complète ton profil pour commencer</div>
 
         <div style={s.fg}>
-          <label style={s.fl}>Ton prénom - (où celui d'un autre, mais on déconseille) <span style={s.required}>*</span></label>
+          <label style={s.fl}>Ton prénom (ou celui d'un autre, mais on déconseille) <span style={s.required}>*</span></label>
           <input
             style={s.fi}
             value={prenom}
@@ -77,7 +77,7 @@ export default function Onboarding({ session, onComplete }) {
         </div>
 
         <div style={s.fg}>
-          <label style={s.fl}>Ton nom de famille - il n'y a que tes copains qui pourront le voir</label>
+          <label style={s.fl}>Ton nom (il n'y a que tes copains qui pourront le voir)</label>
           <input
             style={s.fi}
             value={nom}
