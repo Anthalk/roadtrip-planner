@@ -25,9 +25,11 @@ const IconUserPlus = () => (
   </svg>
 )
 
-function Avatar({ name, email, size = 36 }) {
-  const initials = (name || email || '?').slice(0, 2).toUpperCase()
-  const hue = ((name || email || '').charCodeAt(0) * 37) % 360
+function Avatar({ name, email, prenom, nom, size = 36 }) {
+  const initials = prenom
+    ? (prenom[0] + (nom?.[0] || prenom[1] || '')).toUpperCase()
+    : (name || email || '?').slice(0, 2).toUpperCase()
+  const hue = ((prenom || name || email || '').charCodeAt(0) * 37) % 360
   return (
     <div style={{
       width: size, height: size, borderRadius: '50%',
@@ -40,6 +42,10 @@ function Avatar({ name, email, size = 36 }) {
       {initials}
     </div>
   )
+}
+
+function displayName(u) {
+  return u.prenom ? `${u.prenom}${u.nom ? ' ' + u.nom : ''}` : u.display_name || u.email
 }
 
 export default function TabCopains({ session }) {
@@ -58,7 +64,6 @@ export default function TabCopains({ session }) {
   const fetchRelations = useCallback(async () => {
     setLoading(true)
 
-    // 1. Récupérer toutes les friendships
     const { data: friendships, error } = await supabase
       .from('friendships')
       .select('id, requester_id, addressee_id, status')
@@ -66,22 +71,19 @@ export default function TabCopains({ session }) {
 
     if (error || !friendships) { setLoading(false); return }
 
-    // 2. Collecter les IDs des autres
     const otherIds = [...new Set(
       friendships.map(f => f.requester_id === userId ? f.addressee_id : f.requester_id)
     )]
 
-    // 3. Récupérer leurs profils
     let profilesMap = {}
     if (otherIds.length > 0) {
       const { data: profiles } = await supabase
         .from('profiles')
-        .select('id, display_name, email, avatar_initials')
+        .select('id, display_name, email, avatar_initials, prenom, nom, username')
         .in('id', otherIds)
       if (profiles) profiles.forEach(p => { profilesMap[p.id] = p })
     }
 
-    // 4. Construire les listes
     const accepted = friendships.filter(f => f.status === 'accepted')
     const pending  = friendships.filter(f => f.status === 'pending')
 
@@ -111,8 +113,8 @@ export default function TabCopains({ session }) {
       setSearching(true)
       const { data } = await supabase
         .from('profiles')
-        .select('id, display_name, email, avatar_initials')
-        .or(`display_name.ilike.%${query}%,email.ilike.%${query}%`)
+        .select('id, display_name, email, avatar_initials, prenom, nom, username')
+        .or(`display_name.ilike.%${query}%,email.ilike.%${query}%,username.ilike.%${query}%,prenom.ilike.%${query}%`)
         .neq('id', userId)
         .limit(5)
       setResults(data || [])
@@ -177,7 +179,7 @@ export default function TabCopains({ session }) {
           style={s.searchInput}
           value={query}
           onChange={e => setQuery(e.target.value)}
-          placeholder="Rechercher par nom ou email…"
+          placeholder="Rechercher par nom, pseudo ou email…"
         />
         {query && (
           <button style={s.clearBtn} onClick={() => { setQuery(''); setResults([]) }}>
@@ -186,6 +188,7 @@ export default function TabCopains({ session }) {
         )}
       </div>
 
+      {/* Résultats recherche */}
       {query.trim() && (
         <div style={s.section}>
           {searching ? (
@@ -197,10 +200,10 @@ export default function TabCopains({ session }) {
               const statut = getStatut(u.id)
               return (
                 <div key={u.id} style={s.row}>
-                  <Avatar name={u.display_name} email={u.email} />
+                  <Avatar name={u.display_name} email={u.email} prenom={u.prenom} nom={u.nom} />
                   <div style={s.rowInfo}>
-                    <div style={s.rowName}>{u.display_name || u.email}</div>
-                    {u.display_name && <div style={s.rowSub}>{u.email}</div>}
+                    <div style={s.rowName}>{displayName(u)}</div>
+                    {u.username && <div style={s.rowSub}>@{u.username}</div>}
                   </div>
                   {statut === 'aucun' && (
                     <button style={s.btnAdd} onClick={() => envoyerDemande(u.id)} disabled={actionLoading === u.id}>
@@ -217,6 +220,7 @@ export default function TabCopains({ session }) {
         </div>
       )}
 
+      {/* Demandes reçues */}
       {!query && demandes.length > 0 && (
         <div style={s.section}>
           <div style={s.sectionLabel}>
@@ -224,10 +228,10 @@ export default function TabCopains({ session }) {
           </div>
           {demandes.map(d => (
             <div key={d.friendshipId} style={s.row}>
-              <Avatar name={d.display_name} email={d.email} />
+              <Avatar name={d.display_name} email={d.email} prenom={d.prenom} nom={d.nom} />
               <div style={s.rowInfo}>
-                <div style={s.rowName}>{d.display_name || d.email}</div>
-                {d.display_name && <div style={s.rowSub}>{d.email}</div>}
+                <div style={s.rowName}>{displayName(d)}</div>
+                {d.username && <div style={s.rowSub}>@{d.username}</div>}
               </div>
               <div style={s.actions}>
                 <button style={s.btnAccept} onClick={() => repondre(d.friendshipId, true)} disabled={actionLoading === d.friendshipId}>
@@ -242,6 +246,7 @@ export default function TabCopains({ session }) {
         </div>
       )}
 
+      {/* Liste copains */}
       {!query && (
         <div style={s.section}>
           <div style={s.sectionLabel}>
@@ -254,10 +259,10 @@ export default function TabCopains({ session }) {
           ) : (
             copains.map(c => (
               <div key={c.friendshipId} style={s.row}>
-                <Avatar name={c.display_name} email={c.email} />
+                <Avatar name={c.display_name} email={c.email} prenom={c.prenom} nom={c.nom} />
                 <div style={s.rowInfo}>
-                  <div style={s.rowName}>{c.display_name || c.email}</div>
-                  {c.display_name && <div style={s.rowSub}>{c.email}</div>}
+                  <div style={s.rowName}>{displayName(c)}</div>
+                  {c.username && <div style={s.rowSub}>@{c.username}</div>}
                 </div>
                 <button style={s.btnRemove} onClick={() => supprimerCopain(c.friendshipId)} disabled={actionLoading === c.friendshipId}>
                   <IconX />

@@ -12,9 +12,11 @@ const IconPlus = () => (
   </svg>
 )
 
-function Avatar({ name, email, size = 36 }) {
-  const initials = (name || email || '?').slice(0, 2).toUpperCase()
-  const hue = ((name || email || '').charCodeAt(0) * 37) % 360
+function Avatar({ name, email, prenom, nom, size = 36 }) {
+  const initials = prenom
+    ? (prenom[0] + (nom?.[0] || prenom[1] || '')).toUpperCase()
+    : (name || email || '?').slice(0, 2).toUpperCase()
+  const hue = ((prenom || name || email || '').charCodeAt(0) * 37) % 360
   return (
     <div style={{
       width: size, height: size, borderRadius: '50%',
@@ -27,6 +29,10 @@ function Avatar({ name, email, size = 36 }) {
       {initials}
     </div>
   )
+}
+
+function displayName(u) {
+  return u.prenom ? `${u.prenom}${u.nom ? ' ' + u.nom : ''}` : u.display_name || u.email
 }
 
 export default function EquipageModal({ voyageId, session, onClose }) {
@@ -62,7 +68,7 @@ export default function EquipageModal({ voyageId, session, onClose }) {
     if (membreIds.length > 0) {
       const { data: profiles } = await supabase
         .from('profiles')
-        .select('id, display_name, email, avatar_initials')
+        .select('id, display_name, email, avatar_initials, prenom, nom, username')
         .in('id', membreIds)
       const map = {}
       if (profiles) profiles.forEach(p => { map[p.id] = p })
@@ -78,7 +84,7 @@ export default function EquipageModal({ voyageId, session, onClose }) {
     if (copainsNonMembres.length > 0) {
       const { data: profiles } = await supabase
         .from('profiles')
-        .select('id, display_name, email, avatar_initials')
+        .select('id, display_name, email, avatar_initials, prenom, nom, username')
         .in('id', copainsNonMembres)
       copainsDisponibles = profiles || []
     }
@@ -131,17 +137,16 @@ export default function EquipageModal({ voyageId, session, onClose }) {
             ) : (
               membres.map(m => (
                 <div key={m.id} style={s.row}>
-                  <Avatar name={m.display_name} email={m.email} />
+                  <Avatar name={m.display_name} email={m.email} prenom={m.prenom} nom={m.nom} />
                   <div style={s.rowInfo}>
-                    <div style={s.rowName}>{m.display_name || m.email}</div>
-                    <div style={s.rowSub}>{m.role === 'owner' ? 'Organisateur' : 'Membre'}</div>
+                    <div style={s.rowName}>{displayName(m)}</div>
+                    <div style={s.rowSub}>
+                      {m.username && <span>@{m.username} · </span>}
+                      {m.role === 'owner' ? 'Organisateur' : 'Membre'}
+                    </div>
                   </div>
                   {m.role !== 'owner' && (
-                    <button
-                      style={s.btnRemove}
-                      onClick={() => retirerMembre(m.id)}
-                      disabled={actionLoading === m.id}
-                    >
+                    <button style={s.btnRemove} onClick={() => retirerMembre(m.id)} disabled={actionLoading === m.id}>
                       <IconX />
                     </button>
                   )}
@@ -157,16 +162,12 @@ export default function EquipageModal({ voyageId, session, onClose }) {
                 </div>
                 {copains.map(c => (
                   <div key={c.id} style={s.row}>
-                    <Avatar name={c.display_name} email={c.email} />
+                    <Avatar name={c.display_name} email={c.email} prenom={c.prenom} nom={c.nom} />
                     <div style={s.rowInfo}>
-                      <div style={s.rowName}>{c.display_name || c.email}</div>
-                      {c.display_name && <div style={s.rowSub}>{c.email}</div>}
+                      <div style={s.rowName}>{displayName(c)}</div>
+                      {c.username && <div style={s.rowSub}>@{c.username}</div>}
                     </div>
-                    <button
-                      style={s.btnAdd}
-                      onClick={() => ajouterMembre(c.id)}
-                      disabled={actionLoading === c.id}
-                    >
+                    <button style={s.btnAdd} onClick={() => ajouterMembre(c.id)} disabled={actionLoading === c.id}>
                       <IconPlus />
                     </button>
                   </div>
