@@ -66,7 +66,7 @@ export default function Onboarding({ session, onComplete }) {
         <div style={s.sub}>Complète ton profil pour commencer</div>
 
         <div style={s.fg}>
-          <label style={s.fl}>Prénom <span style={s.required}>*</span></label>
+          <label style={s.fl}>Ton prénom - (où celui d'un autre, mais on déconseille) <span style={s.required}>*</span></label>
           <input
             style={s.fi}
             value={prenom}
@@ -77,7 +77,7 @@ export default function Onboarding({ session, onComplete }) {
         </div>
 
         <div style={s.fg}>
-          <label style={s.fl}>Nom</label>
+          <label style={s.fl}>Ton nom de famille - il n'y a que tes copains qui pourront le voir</label>
           <input
             style={s.fi}
             value={nom}
@@ -87,14 +87,14 @@ export default function Onboarding({ session, onComplete }) {
         </div>
 
         <div style={s.fg}>
-          <label style={s.fl}>Nom d'utilisateur <span style={s.required}>*</span></label>
+          <label style={s.fl}> Et un petit surnom ? <span style={s.required}>*</span></label>
           <div style={s.usernameWrap}>
             <span style={s.usernameAt}>@</span>
             <input
               style={s.usernameInput}
               value={username}
               onChange={e => setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9._]/g, ''))}
-              placeholder="antoine.dupont"
+              placeholder="LeGOAT"
             />
           </div>
           <div style={s.hint}>Lettres minuscules, chiffres, points et underscores uniquement</div>
