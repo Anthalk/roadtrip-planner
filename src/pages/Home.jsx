@@ -125,32 +125,87 @@ function TabVoyages({ session, onSelectVoyage }) {
   )
 }
 
-// --- Onglet Profil ---
-function TabProfil({ session }) {
+function TabProfil({ session, profile, onProfileUpdate }) {
+  const [editing, setEditing] = useState(false)
+  const [prenom, setPrenom] = useState('')
+  const [nom, setNom] = useState('')
+  const [username, setUsername] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(null)
+
   const logout = () => supabase.auth.signOut()
-  const initials = session.user.user_metadata?.display_name
-    ? session.user.user_metadata.display_name.slice(0, 2).toUpperCase()
-    : session.user.email.slice(0, 2).toUpperCase()
+
+  const openEdit = () => {
+    setPrenom(profile?.prenom || '')
+    setNom(profile?.nom || '')
+    setUsername(profile?.username || '')
+    setError(null)
+    setEditing(true)
+  }
+
+  const saveEdit = async () => {
+    if (!prenom.trim() || !username.trim()) {
+      setError('Prénom et nom d\'utilisateur obligatoires.')
+      return
+    }
+    setLoading(true)
+    const displayName = `${prenom.trim()}${nom.trim() ? ' ' + nom.trim() : ''}`
+    const initials = (prenom[0] || '') + (nom[0] || prenom[1] || '')
+    const { error: err } = await supabase.from('profiles').update({
+      prenom: prenom.trim(),
+      nom: nom.trim() || null,
+      username: username.trim(),
+      display_name: displayName,
+      avatar_initials: initials.toUpperCase(),
+    }).eq('id', session.user.id)
+    if (err) { setError('Erreur lors de la sauvegarde.'); setLoading(false); return }
+    await onProfileUpdate()
+    setLoading(false)
+    setEditing(false)
+  }
+
+  const initials = (profile?.avatar_initials || profile?.prenom?.slice(0, 2) || session.user.email.slice(0, 2)).toUpperCase()
+  const displayName = profile?.prenom ? `${profile.prenom}${profile.nom ? ' ' + profile.nom : ''}` : session.user.email
 
   return (
     <>
       <div style={s.sheetHeader}>
         <span style={s.sheetTitle}>Profil</span>
+        {!editing && <button style={s.editProfilBtn} onClick={openEdit}>Modifier</button>}
       </div>
-      <div style={s.profilContent}>
-        <div style={s.avatar}>{initials}</div>
-        <div style={s.profilName}>{session.user.user_metadata?.display_name || session.user.email}</div>
-        <div style={s.profilEmail}>{session.user.email}</div>
-        <button style={{ ...s.btnG, marginTop: 24, width: '100%' }} onClick={logout}>
-          Déconnexion
-        </button>
-      </div>
+
+      {!editing ? (
+        <div style={s.profilContent}>
+          <div style={s.avatar}>{initials}</div>
+          <div style={s.profilName}>{displayName}</div>
+          {profile?.username && <div style={s.profilUsername}>@{profile.username}</div>}
+          <div style={s.profilEmail}>{session.user.email}</div>
+          <button style={{ ...s.btnG, marginTop: 24, width: '100%' }} onClick={logout}>Déconnexion</button>
+        </div>
+      ) : (
+        <div style={{ padding: '12px 20px 8px' }}>
+          <div style={s.fg}>
+            <label style={s.fl}>Prénom</label>
+            <input style={s.fi} value={prenom} onChange={e => setPrenom(e.target.value)} />
+          </div>
+          <div style={s.fg}>
+            <label style={s.fl}>Nom</label>
+            <input style={s.fi} value={nom} onChange={e => setNom(e.target.value)} />
+          </div>
+          <div style={s.fg}>
+            <label style={s.fl}>Nom d'utilisateur</label>
+            <input style={s.fi} value={username} onChange={e => setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9._]/g, ''))} />
+          </div>
+          {error && <div style={{ fontSize: 12, color: 'rgba(255,80,80,0.8)', marginBottom: 10 }}>{error}</div>}
+          <button style={s.btnP} onClick={saveEdit} disabled={loading}>{loading ? 'Enregistrement…' : 'Enregistrer'}</button>
+          <button style={s.btnG} onClick={() => setEditing(false)}>Annuler</button>
+        </div>
+      )}
     </>
   )
 }
-
 // --- Composant principal ---
-export default function Home({ session, onSelectVoyage }) {
+export default function Home({ session, profile, onSelectVoyage, onProfileUpdate }) {
   const [tab, setTab] = useState('voyages')
 
   const tabs = [
@@ -173,8 +228,7 @@ export default function Home({ session, onSelectVoyage }) {
         {/* Contenu selon onglet */}
         {tab === 'voyages' && <TabVoyages session={session} onSelectVoyage={onSelectVoyage} />}
         {tab === 'copains' && <TabCopains session={session} />}
-        {tab === 'profil'  && <TabProfil  session={session} />}
-
+        {tab === 'profil' && <TabProfil session={session} profile={profile} onProfileUpdate={onProfileUpdate} />}
         {/* Bottom nav */}
         <div style={s.nav}>
           {tabs.map(({ id, label, Icon }) => (
@@ -227,7 +281,8 @@ const s = {
   avatar:       { width: 64, height: 64, borderRadius: '50%', background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'Georgia,serif', fontSize: 22, color: 'white', marginBottom: 12 },
   profilName:   { fontFamily: 'Georgia,serif', fontSize: 18, color: 'white', marginBottom: 4 },
   profilEmail:  { fontSize: 12, color: 'rgba(255,255,255,0.35)' },
-
+  editProfilBtn: { background: 'none', border: 'none', color: 'rgba(255,255,255,0.4)', cursor: 'pointer', fontSize: 12, fontFamily: 'inherit' },
+  profilUsername: { fontSize: 13, color: 'rgba(255,255,255,0.4)', marginBottom: 2 },
   // Modal
   overlay:      { position: 'fixed', inset: 0, zIndex: 200, background: 'rgba(0,0,0,0.72)', display: 'flex', alignItems: 'flex-end' },
   modal:        { background: '#12171F', borderRadius: '24px 24px 0 0', borderTop: '1px solid rgba(255,255,255,0.08)', padding: '0 20px 44px', width: '100%' },
