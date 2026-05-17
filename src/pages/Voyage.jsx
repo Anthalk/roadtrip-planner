@@ -229,7 +229,7 @@ export default function Voyage({ voyageId, onSelectEtape, onBack, session }) {
 const container = reorgScrollRef.current;
 if (container) {
   const containerRect = container.getBoundingClientRect();
-  const edgeSize = 80;
+  const edgeSize = 140;
   clearInterval(autoScrollRef.current);
   if (touch.clientX < containerRect.left + edgeSize) {
     const speed = Math.round((containerRect.left + edgeSize - touch.clientX) / 4);
