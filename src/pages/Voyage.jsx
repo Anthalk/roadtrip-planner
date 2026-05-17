@@ -63,7 +63,15 @@ export default function Voyage({ voyageId, onSelectEtape, onBack, session }) {
   const autoScrollRef = useRef(null);
 
   useEffect(() => { fetchData(); }, [voyageId]);
-
+  useEffect(() => {
+    const container = reorgScrollRef.current;
+    if (!container) return;
+    const handler = (ev) => {
+      if (dragIdx !== null) ev.preventDefault();
+    };
+    container.addEventListener('touchmove', handler, { passive: false });
+    return () => container.removeEventListener('touchmove', handler);
+  }, [dragIdx]);
   const fetchData = async () => {
     const [{ data: v }, { data: e }] = await Promise.all([
       supabase.from('voyages').select('*').eq('id', voyageId).single(),
