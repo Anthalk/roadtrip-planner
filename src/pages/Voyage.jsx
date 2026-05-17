@@ -60,6 +60,7 @@ export default function Voyage({ voyageId, onSelectEtape, onBack, session }) {
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 }); // offset doigt/coin carte
   const cardRefs = useRef([]);
   const reorgScrollRef = useRef(null);
+  const autoScrollRef = useRef(null);
 
   useEffect(() => { fetchData(); }, [voyageId]);
 
@@ -216,7 +217,20 @@ export default function Voyage({ voyageId, onSelectEtape, onBack, session }) {
       x: touch.clientX - dragOffset.x,
       y: touch.clientY - dragOffset.y,
     });
-
+// Auto-scroll
+const container = reorgScrollRef.current;
+if (container) {
+  const containerRect = container.getBoundingClientRect();
+  const edgeSize = 80;
+  clearInterval(autoScrollRef.current);
+  if (touch.clientX < containerRect.left + edgeSize) {
+    const speed = Math.round((containerRect.left + edgeSize - touch.clientX) / 4);
+    autoScrollRef.current = setInterval(() => { container.scrollLeft -= speed; }, 16);
+  } else if (touch.clientX > containerRect.right - edgeSize) {
+    const speed = Math.round((touch.clientX - (containerRect.right - edgeSize)) / 4);
+    autoScrollRef.current = setInterval(() => { container.scrollLeft += speed; }, 16);
+  }
+}
     // Trouver la cible en dessous
     let newDrop = dropIdx;
     cardRefs.current.forEach((card, idx) => {
@@ -231,6 +245,7 @@ export default function Voyage({ voyageId, onSelectEtape, onBack, session }) {
   };
 
   const onContainerTouchEnd = () => {
+    clearInterval(autoScrollRef.current);
     if (dragIdx === null) return;
 
     if (dropIdx !== null && dropIdx !== dragIdx) {
