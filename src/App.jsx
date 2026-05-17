@@ -4,22 +4,37 @@ import Auth from './components/Auth'
 import Home from './pages/Home'
 import Voyage from './pages/Voyage'
 import Etape from './pages/Etape'
+import Onboarding from './pages/Onboarding'
 
 export default function App() {
   const [session, setSession] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [profile, setProfile] = useState(null)
   const [route, setRoute] = useState({ page: 'home', voyageId: null, etapeId: null })
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session)
-      setLoading(false)
+      if (session) fetchProfile(session.user.id)
+      else setLoading(false)
     })
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, session) => {
       setSession(session)
+      if (session) fetchProfile(session.user.id)
+      else { setProfile(null); setLoading(false) }
     })
     return () => subscription.unsubscribe()
   }, [])
+
+  const fetchProfile = async (userId) => {
+    const { data } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', userId)
+      .single()
+    setProfile(data)
+    setLoading(false)
+  }
 
   const navigate = (page, params = {}) => setRoute({ page, ...params })
 
@@ -31,6 +46,14 @@ export default function App() {
   )
 
   if (!session) return <Auth />
+
+  // Profil incomplet → onboarding
+  if (!profile?.prenom) return (
+    <Onboarding
+      session={session}
+      onComplete={() => fetchProfile(session.user.id)}
+    />
+  )
 
   if (route.page === 'voyage') return (
     <Voyage
@@ -53,7 +76,9 @@ export default function App() {
   return (
     <Home
       session={session}
+      profile={profile}
       onSelectVoyage={voyageId => navigate('voyage', { voyageId })}
+      onProfileUpdate={() => fetchProfile(session.user.id)}
     />
   )
 }
