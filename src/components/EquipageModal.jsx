@@ -145,11 +145,13 @@ export default function EquipageModal({ voyageId, session, onClose }) {
                       {m.role === 'owner' ? 'Organisateur' : 'Membre'}
                     </div>
                   </div>
-                  {m.role !== 'owner' && (
-                    <button style={s.btnRemove} onClick={() => retirerMembre(m.id)} disabled={actionLoading === m.id}>
-                      <IconX />
-                    </button>
-                  )}
+                  {m.role !== 'owner' ? (
+  <button style={s.btnRemove} onClick={() => retirerMembre(m.id)} disabled={actionLoading === m.id}>
+    <IconX />
+  </button>
+) : (
+  <div style={{ width: 22, flexShrink: 0 }} />
+)}
                 </div>
               ))
             )}
