@@ -155,7 +155,6 @@ export default function Etape({ etapeId, voyageId, onBack }) {
           onMouseUp={onDragEnd}
           onTouchStart={onDragStart}
           onTouchEnd={onDragEnd}
-          onClick={() => setSheetExpanded((e) => !e)}
         >
           <div style={s.handle} />
         </div>
