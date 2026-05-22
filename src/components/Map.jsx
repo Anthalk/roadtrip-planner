@@ -41,7 +41,7 @@ const Map = forwardRef(function Map({ etapes = [], spots = [], routes = {}, tigh
     map.current = new maptilersdk.Map({
       container: mapContainer.current,
       style: maptilersdk.MapStyle.HYBRID_V4,
-      center: [20, -80],
+      center: [20, 5],
       zoom: 1,
       zoomControl: false,
       projection : 'globe',
