@@ -42,7 +42,7 @@ const Map = forwardRef(function Map({ etapes = [], spots = [], routes = {}, tigh
       container: mapContainer.current,
       style: maptilersdk.MapStyle.HYBRID_V4,
       center: [20, 30],
-      zoom: 2,
+      zoom: 0,
       zoomControl: false,
       navigationControl: false,
       geolocateControl: false,
