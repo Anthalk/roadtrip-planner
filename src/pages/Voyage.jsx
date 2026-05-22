@@ -532,7 +532,7 @@ if (container) {
             </div>
             <div style={s.fg}>
               <label style={s.fl}>Nuits</label>
-              <input style={s.fi} type="number" min="1" value={nuits} onChange={e => setNuits(e.target.value)} />
+              <input style={s.fi} type="number" min="0" value={nuits} onChange={e => setNuits(e.target.value)} />
             </div>
             <button style={s.btnP} onClick={addEtape}>Ajouter</button>
             <button style={s.btnG} onClick={() => { setModal(false); setNom(''); setSuggestions([]); setSelected(null); }}>Annuler</button>
@@ -576,7 +576,7 @@ if (container) {
             <div style={s.sectionLabel}>Général</div>
             <div style={s.fg}>
               <label style={s.fl}>Nuits</label>
-              <input style={s.fi} type="number" min="1" value={editNuits} onChange={e => setEditNuits(e.target.value)} />
+              <input style={s.fi} type="number" min="0" value={editNuits} onChange={e => setEditNuits(e.target.value)} />
             </div>
 
             <div style={s.sectionLabel}>Hôtel</div>
