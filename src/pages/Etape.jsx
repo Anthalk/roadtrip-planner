@@ -1,7 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import Map from '../components/Map';
-import { useSheetDrag } from '../hooks/useSheetDrag';
 
 const CATS = ['Visite', 'Resto', 'Bar', 'Hébergement', 'Autre'];
 const CAT_COLOR = {
@@ -26,11 +25,12 @@ export default function Etape({ etapeId, voyageId, onBack }) {
   const timer = { current: null };
   const mapRef = useRef(null);
 
-  const { sheetExpanded, setSheetExpanded, sheetStyle, handleProps } = useSheetDrag({
-    expandedHeight: '50vh',
-    collapsedHeight: '14vh',
-    initialExpanded: true,
-  });
+  // Sheet drag
+  const [sheetExpanded, setSheetExpanded] = useState(true);
+  const [sheetTranslate, setSheetTranslate] = useState(0);
+  const [sheetDragging, setSheetDragging] = useState(false);
+  const sheetDragY = useRef(null);
+  const sheetDragTime = useRef(null);
 
   useEffect(() => { fetchData(); }, [etapeId]);
 
@@ -87,6 +87,37 @@ export default function Etape({ etapeId, voyageId, onBack }) {
     setSpotModal(null);
   };
 
+  // Handle drag
+  const onHandleTouchStart = (e) => {
+    sheetDragY.current = e.touches[0].clientY;
+    sheetDragTime.current = Date.now();
+    setSheetDragging(true);
+  };
+
+  const onHandleTouchMove = (e) => {
+    if (sheetDragY.current === null) return;
+    const delta = e.touches[0].clientY - sheetDragY.current;
+    // Résistance dans la direction opposée
+    if (sheetExpanded && delta < 0) setSheetTranslate(delta * 0.2);
+    else if (!sheetExpanded && delta > 0) setSheetTranslate(delta * 0.2);
+    else setSheetTranslate(delta * 0.8);
+  };
+
+  const onHandleTouchEnd = (e) => {
+    const endY = e.changedTouches[0].clientY;
+    const delta = endY - sheetDragY.current;
+    const elapsed = Date.now() - sheetDragTime.current;
+    const isTap = Math.abs(delta) < 8 && elapsed < 200;
+
+    if (isTap) setSheetExpanded(p => !p);
+    else if (delta > 40) setSheetExpanded(false);
+    else if (delta < -40) setSheetExpanded(true);
+
+    sheetDragY.current = null;
+    setSheetTranslate(0);
+    setSheetDragging(false);
+  };
+
   const total = spots.length;
   const done = spots.filter((s) => s.done).length;
   const byCat = CATS.reduce((a, c) => ({ ...a, [c]: spots.filter((s) => s.categorie === c) }), {});
@@ -111,9 +142,20 @@ export default function Etape({ etapeId, voyageId, onBack }) {
         <Map ref={mapRef} etapes={etape ? [etape] : []} spots={spots} tight={true} />
       </div>
 
-      <div style={{ ...s.sheet, ...sheetStyle }}>
-        {/* Handle draggable */}
-        <div style={s.handleWrap} {...handleProps}>
+      <div style={{
+        ...s.sheet,
+        height: sheetExpanded ? '50vh' : '14vh',
+        transform: `translateY(${sheetTranslate}px)`,
+        transition: sheetDragging ? 'none' : 'height 0.35s cubic-bezier(0.4,0,0.2,1), transform 0.35s cubic-bezier(0.4,0,0.2,1)',
+        overflow: 'hidden',
+        flexShrink: 0,
+      }}>
+        <div
+          style={s.handleWrap}
+          onTouchStart={onHandleTouchStart}
+          onTouchMove={onHandleTouchMove}
+          onTouchEnd={onHandleTouchEnd}
+        >
           <div style={s.handle} />
         </div>
 
@@ -185,9 +227,7 @@ export default function Etape({ etapeId, voyageId, onBack }) {
                             <div style={s.spotCardNom}>{spot.nom}</div>
                             {spot.adresse && <div style={s.spotCardAddr}>{spot.adresse}</div>}
                             <div style={s.spotCardActions}>
-                              {spot.lat && (
-                                <a href={navUrl(spot)} target="_blank" rel="noreferrer" style={s.spotCardBtn}>↗ S'y rendre</a>
-                              )}
+                              {spot.lat && <a href={navUrl(spot)} target="_blank" rel="noreferrer" style={s.spotCardBtn}>↗ S'y rendre</a>}
                               <button style={{ ...s.spotCardBtn, color: 'rgba(255,80,80,0.6)', borderColor: 'rgba(255,80,80,0.2)' }} onClick={() => deleteSpot(spot.id)}>✕</button>
                             </div>
                           </div>
@@ -288,7 +328,7 @@ const s = {
   title:        { fontFamily: 'Georgia,serif', fontSize: 22, color: 'white', textShadow: '0 2px 16px rgba(0,0,0,0.6)' },
   sub:          { fontSize: 12, color: 'rgba(255,255,255,0.4)', marginTop: 2 },
   sheet:        { background: 'rgba(10,14,20,0.95)', backdropFilter: 'blur(24px)', borderRadius: '22px 22px 0 0', borderTop: '1px solid rgba(255,255,255,0.07)', position: 'relative', zIndex: 10, display: 'flex', flexDirection: 'column' },
-  handleWrap:   { padding: '10px 0 4px', cursor: 'grab', userSelect: 'none', flexShrink: 0 },
+  handleWrap:   { padding: '14px 0 6px', cursor: 'grab', userSelect: 'none', flexShrink: 0, touchAction: 'none' },
   handle:       { width: 36, height: 4, background: 'rgba(255,255,255,0.15)', borderRadius: 2, margin: '0 auto' },
   sheetHeader:  { padding: '4px 20px 6px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 },
   sheetTitle:   { fontFamily: 'Georgia,serif', fontSize: 15, color: 'rgba(255,255,255,0.8)' },
