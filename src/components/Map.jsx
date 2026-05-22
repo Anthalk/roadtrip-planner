@@ -41,13 +41,16 @@ const Map = forwardRef(function Map({ etapes = [], spots = [], routes = {}, tigh
     map.current = new maptilersdk.Map({
       container: mapContainer.current,
       style: maptilersdk.MapStyle.HYBRID_V4,
-      center: [10, -30],
+      center: [0, 0],
       zoom: 1,
       zoomControl: false,
       projection : 'globe',
       navigationControl: false,
       geolocateControl: false,
       attributionControl: false,
+    });
+    map.current.once('load', () => {
+      map.current.setPadding({ top: 0, bottom: 250, left: 0, right: 0 });
     });
   }, []);
 
