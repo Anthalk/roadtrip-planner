@@ -93,26 +93,25 @@ export default function Etape({ etapeId, voyageId, onBack }) {
     sheetDragTime.current = Date.now();
     setSheetDragging(true);
   };
-
+  
   const onHandleTouchMove = (e) => {
     if (sheetDragY.current === null) return;
     const delta = e.touches[0].clientY - sheetDragY.current;
-    // Résistance dans la direction opposée
-    if (sheetExpanded && delta < 0) setSheetTranslate(delta * 0.2);
-    else if (!sheetExpanded && delta > 0) setSheetTranslate(delta * 0.2);
-    else setSheetTranslate(delta * 0.8);
+    // Limiter le translateY pour éviter que le sheet disparaisse
+    const clamped = Math.max(-30, Math.min(150, delta * 0.6));
+    setSheetTranslate(clamped);
   };
-
+  
   const onHandleTouchEnd = (e) => {
     const endY = e.changedTouches[0].clientY;
     const delta = endY - sheetDragY.current;
     const elapsed = Date.now() - sheetDragTime.current;
     const isTap = Math.abs(delta) < 8 && elapsed < 200;
-
+  
     if (isTap) setSheetExpanded(p => !p);
     else if (delta > 40) setSheetExpanded(false);
     else if (delta < -40) setSheetExpanded(true);
-
+  
     sheetDragY.current = null;
     setSheetTranslate(0);
     setSheetDragging(false);
