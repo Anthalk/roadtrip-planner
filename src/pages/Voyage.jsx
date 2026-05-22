@@ -21,7 +21,7 @@ export default function Voyage({ voyageId, onSelectEtape, onBack, session }) {
 
   // Ajout étape
   const [nom, setNom] = useState('');
-  const [nuits, setNuits] = useState('2');
+  const [nuits, setNuits] = useState('0');
   const [suggestions, setSuggestions] = useState([]);
   const [sugLoading, setSugLoading] = useState(false);
   const [selected, setSelected] = useState(null);
@@ -132,8 +132,7 @@ export default function Voyage({ voyageId, onSelectEtape, onBack, session }) {
       nom: selected?.name || nom,
       lat: selected?.lat || null,
       lon: selected?.lon || null,
-      nuits: parseInt(nuits) || 1,
-      ordre: etapes.length,
+      nuits: parseInt(nuits) >= 0 ? parseInt(nuits) : 1,      ordre: etapes.length,
     });
     setNom(''); setNuits('2'); setSelected(null); setSuggestions([]); setModal(false);
     fetchData();
@@ -160,8 +159,7 @@ export default function Voyage({ voyageId, onSelectEtape, onBack, session }) {
       nom: editLieuSelected?.name || editLieuNom,
       lat: editLieuSelected?.lat ?? editModal.lat,
       lon: editLieuSelected?.lon ?? editModal.lon,
-      nuits: parseInt(editNuits) || 1,
-      hotel_nom: editHotelNom,
+      nuits: parseInt(editNuits) >= 0 ? parseInt(editNuits) : 1,      hotel_nom: editHotelNom,
       hotel_adresse: editHotelAdresse,
       hotel_confirmation: editHotelConfirmation,
       hotel_checkin: editCheckin || null,
