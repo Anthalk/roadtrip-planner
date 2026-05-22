@@ -97,7 +97,6 @@ export default function Etape({ etapeId, voyageId, onBack }) {
   const onHandleTouchMove = (e) => {
     if (sheetDragY.current === null) return;
     const delta = e.touches[0].clientY - sheetDragY.current;
-    // Limiter le translateY pour éviter que le sheet disparaisse
     const clamped = Math.max(-30, Math.min(150, delta * 0.6));
     setSheetTranslate(clamped);
   };
@@ -116,7 +115,6 @@ export default function Etape({ etapeId, voyageId, onBack }) {
     setSheetTranslate(0);
     setSheetDragging(false);
   };
-
   const total = spots.length;
   const done = spots.filter((s) => s.done).length;
   const byCat = CATS.reduce((a, c) => ({ ...a, [c]: spots.filter((s) => s.categorie === c) }), {});
