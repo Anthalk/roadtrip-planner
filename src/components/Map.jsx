@@ -44,6 +44,7 @@ const Map = forwardRef(function Map({ etapes = [], spots = [], routes = {}, tigh
       center: [20, 30],
       zoom: 0,
       zoomControl: false,
+      projection : 'globe',
       navigationControl: false,
       geolocateControl: false,
       attributionControl: false,
